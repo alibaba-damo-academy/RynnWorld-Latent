@@ -1,0 +1,78 @@
+# ============================================================================
+# RynnWorld-Latent — Cosmos3-Edge FULL-PARAMETER fine-tune (the released recipe).
+#
+# Uses the `rynnworld_latent_edge_manifest_fullft` experiment, whose
+# optimizer.keys_to_select=[] makes the ENTIRE 3.37B net trainable (understanding
+# backbone + generation branch + action heads) rather than just the gen branch.
+#
+# Batch is 4 (not 8): full-param training triples optimizer state (AdamW m/v/master
+# for 3.37B vs 1.07B) and, without flash_attn (SDPA fallback), batch 8 would OOM.
+# Once a flash_attn wheel is installed the batch can go back up.
+# ============================================================================
+
+[job]
+task         = "vfm"
+experiment   = "rynnworld_latent_edge_manifest_fullft"
+project      = "rynnworld_latent"
+group        = "rynnworld_latent_sft"
+name         = "rynnworld_latent_manifest_fullft"
+wandb_mode   = "disabled"
+
+[model]
+precision = "bfloat16"
+
+[model.parallelism]
+data_parallel_shard_degree     = 8
+data_parallel_replicate_degree = 1
+
+[model.activation_checkpointing]
+mode           = "full"
+save_ops_regex = ["fmha"]
+
+[model.tokenizer]
+vae_path = "${oc.env:WAN_VAE_PATH}"
+
+# torch.compile OFF. This recipe used to set `compiled_region = "language"` here, but
+# the TOML schema's CompileConfig (cosmos_framework/configs/toml_config/sft_config.py)
+# defines ONLY `enabled` and `compile_dynamic` and forbids extras, so the file failed
+# validation outright — "model.compile.compiled_region: Extra inputs are not
+# permitted" — and could never be loaded by anything. `compiled_region` lives on the
+# attrs-side CompileConfig used by python-defined experiments, where its default is
+# already "language" (transformer blocks only), so enabling compile here does NOT
+# imply the full-model dynamo path that the training launcher (scripts/train.sh) used to
+# guard against.
+#
+# The "11% wall-clock speedup, 100-step confirmation" figure previously quoted here
+# cannot have been measured through this file, since this file did not load. Compile
+# affects speed only, never correctness, so flip it per run with
+# `model.compile.enabled=true` once it has been measured on the target image.
+[model.compile]
+enabled = false
+
+[optimizer]
+lr = 2.0e-04
+
+[scheduler]
+# cycle_lengths MUST equal trainer.max_iter: LambdaLinear decays f_max->f_min over the
+# cycle, so a 50000 cycle with max_iter=20000 stopped at ~61% of peak LR (no anneal).
+cycle_lengths = [20000]
+f_min = [0.04]  # end at 10% of f_max (0.4): peak lr 8e-5 -> final 8e-6
+warm_up_steps = [500]
+
+[dataloader_train]
+# Batch 4 for full-param + SDPA memory headroom (see header). Raise once flash_attn
+# is installed. Marker for the staleness guard: OOM'd in backward.
+max_samples_per_batch = 4
+
+[trainer]
+max_iter        = 20000
+logging_iter    = 50
+grad_accum_iter = 1
+
+[trainer.callbacks.compile_tokenizer]
+enabled            = false
+warmup_resolutions = ["480"]
+
+[checkpoint]
+load_path = "${oc.env:BASE_CHECKPOINT_PATH}"
+save_iter = 500

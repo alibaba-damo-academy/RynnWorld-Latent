@@ -1,0 +1,10 @@
+{
+  "chunks": 3,
+  "datasets": [
+    "tianji_wuji_data"
+  ],
+  "protocol": "v2 ktoken_zcam 608",
+  "action_dim": 608,
+  "stats_schema": "v2",
+  "note": "real in-house teleop samples bundled for out-of-the-box training"
+}

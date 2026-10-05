@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rynnlam"
+version = "0.1.0"
+description = "RynnLAM latent-action model: inference, dense latent-action labeling, and evaluation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+dependencies = [
+    "torch>=2.4,<3",
+    "numpy>=1.24",
+    "safetensors>=0.4",
+    "PyYAML>=6",
+    "einops>=0.7",
+    "opencv-python-headless>=4.8",
+    "Pillow>=10",
+    # tqdm and huggingface_hub are intentionally not direct deps (SCA compliance);
+    # both arrive transitively (tqdm via transformers/datasets, huggingface_hub via
+    # transformers) and the code loads tqdm dynamically with a no-op fallback.
+]
+
+[project.optional-dependencies]
+# Plain mp4/webm labeling + eval needs only `av`. For the non-file video sources
+# rynnlam.video.FrameReader can open (zarr/EgoVerse, hdf5/RoboMIND), install the
+# matching readers via the top-level RynnWorld-Latent `video-sources` extra.
+video = ["av>=12"]
+test = ["pytest>=8", "av>=12"]
+
+[project.scripts]
+rynnlam-label = "label_latent_dense:main"
+rynnlam-evaluate = "evaluate:main"
+
+[tool.setuptools]
+py-modules = ["label_latent_dense", "evaluate", "stream_extract_tar"]
+include-package-data = false
+license-files = ["LICENSE", "NOTICE"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rynnlam*", "lary_adapter*"]
+exclude = ["tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

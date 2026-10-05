@@ -1,0 +1,4 @@
+include README.md LICENSE NOTICE
+recursive-include scripts *.sh
+recursive-include tests *.py
+exclude *.log

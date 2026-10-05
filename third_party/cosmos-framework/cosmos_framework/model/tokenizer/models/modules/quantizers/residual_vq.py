@@ -1,0 +1,609 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: OpenMDW-1.1
+
+"""Residual Quantization (RQ).
+
+Vector quantization with residual learning, where each codebook quantizes
+the residual from previous codebooks. This enables hierarchical discrete
+representations with improved reconstruction quality.
+
+Reference:
+    - SoundStream: https://arxiv.org/abs/2107.03312
+    - RQ-VAE: https://arxiv.org/abs/2203.01941
+"""
+
+from __future__ import annotations
+
+from typing import Iterable
+
+import numpy as np
+import torch
+import torch.distributed as dist
+import torch.nn.functional as F
+from torch import nn
+
+__all__ = [
+    "VQEmbedding",
+    "RQBottleneck",
+]
+
+
+class VQEmbedding(nn.Embedding):
+    """VQ embedding module with exponential moving average (EMA) update.
+
+    This module extends nn.Embedding to support vector quantization with
+    optional EMA-based codebook updates and unused code restart.
+
+    Args:
+        n_embed: Number of embeddings in the codebook.
+        embed_dim: Dimension of each embedding vector.
+        ema: Whether to use EMA for codebook updates.
+        decay: EMA decay rate.
+        restart_unused_codes: Whether to restart unused codebook entries.
+        eps: Small epsilon for numerical stability.
+        distance_chunk_size: Maximum number of input and codebook rows in one
+            distance tile. ``None`` computes the full distance matrix.
+    """
+
+    def __init__(
+        self,
+        n_embed: int,
+        embed_dim: int,
+        ema: bool = True,
+        decay: float = 0.99,
+        restart_unused_codes: bool = True,
+        eps: float = 1e-5,
+        distance_chunk_size: int | None = 4096,
+    ) -> None:
+        """Initialize VQEmbedding."""
+        super().__init__(n_embed + 1, embed_dim, padding_idx=n_embed)
+
+        if distance_chunk_size is not None and distance_chunk_size <= 0:
+            raise ValueError(f"distance_chunk_size must be positive when set, got {distance_chunk_size}.")
+
+        self.ema = ema
+        self.decay = decay
+        self.eps = eps
+        self.restart_unused_codes = restart_unused_codes
+        self.n_embed = n_embed
+        self.distance_chunk_size: int | None = distance_chunk_size
+
+        if self.ema:
+            _ = [p.requires_grad_(False) for p in self.parameters()]
+
+            # Padding index is not updated by EMA
+            self.register_buffer("cluster_size_ema", torch.zeros(n_embed))
+            self.register_buffer("embed_ema", self.weight[:-1, :].detach().clone())
+
+    @torch.no_grad()
+    def compute_distances(self, inputs: torch.Tensor) -> torch.Tensor:
+        """Compute squared L2 distances to codebook entries.
+
+        Args:
+            inputs: Input tensor of shape (..., embed_dim).
+
+        Returns:
+            Distance tensor of shape (..., n_embed).
+        """
+        codebook_t = self.weight[:-1, :].t()  # [E,K]
+        (embed_dim, _) = codebook_t.shape
+        inputs_shape = inputs.shape
+        assert inputs_shape[-1] == embed_dim
+
+        inputs_flat = inputs.reshape(-1, embed_dim).to(dtype=codebook_t.dtype)  # [N,E]
+
+        inputs_norm_sq = inputs_flat.pow(2.0).sum(dim=1, keepdim=True)  # [N,1]
+        codebook_t_norm_sq = codebook_t.pow(2.0).sum(dim=0, keepdim=True)  # [1,K]
+        distances = torch.addmm(
+            inputs_norm_sq + codebook_t_norm_sq,
+            inputs_flat,
+            codebook_t,
+            alpha=-2.0,
+        )  # [N,K]
+        distances = distances.reshape(*inputs_shape[:-1], -1)  # [...,K]
+        return distances
+
+    @torch.no_grad()
+    def find_nearest_embedding(self, inputs: torch.Tensor) -> torch.Tensor:
+        """Find nearest codebook entry for each input.
+
+        Args:
+            inputs: Input tensor of shape (..., embed_dim).
+
+        Returns:
+            Index tensor of shape (...,).
+        """
+        input_shape = inputs.shape
+        embed_dim = input_shape[-1]
+        inputs_flat = inputs.reshape(-1, embed_dim).to(dtype=self.weight.dtype)  # [N,E]
+        codebook = self.weight[:-1, :]  # [K,E]
+        chunk_size = self.distance_chunk_size
+        if chunk_size is None:
+            distances = self.compute_distances(inputs)  # [...,K]
+            return distances.argmin(dim=-1)  # [...]
+
+        best_indices = torch.zeros(inputs_flat.shape[0], dtype=torch.long, device=inputs.device)  # [N]
+        for input_start in range(0, inputs_flat.shape[0], chunk_size):
+            input_end = min(input_start + chunk_size, inputs_flat.shape[0])
+            input_chunk = inputs_flat[input_start:input_end]  # [Nc,E]
+            input_norm_sq = input_chunk.pow(2.0).sum(dim=1, keepdim=True)  # [Nc,1]
+            input_best_distances = input_chunk.new_full((input_chunk.shape[0],), float("inf"))  # [Nc]
+            input_best_indices = torch.zeros(input_chunk.shape[0], dtype=torch.long, device=inputs.device)  # [Nc]
+            for codebook_start in range(0, codebook.shape[0], chunk_size):
+                codebook_end = min(codebook_start + chunk_size, codebook.shape[0])
+                codebook_chunk = codebook[codebook_start:codebook_end]  # [Kc,E]
+                codebook_norm_sq = codebook_chunk.pow(2.0).sum(dim=1).unsqueeze(0)  # [1,Kc]
+                chunk_distances = torch.addmm(
+                    input_norm_sq + codebook_norm_sq,
+                    input_chunk,
+                    codebook_chunk.t(),
+                    alpha=-2.0,
+                )  # [Nc,Kc]
+                chunk_best_distances, chunk_best_indices = chunk_distances.min(dim=1)  # [Nc], [Nc]
+                use_chunk = chunk_best_distances < input_best_distances  # [Nc]
+                input_best_distances = torch.where(  # [Nc]
+                    use_chunk,
+                    chunk_best_distances,
+                    input_best_distances,
+                )
+                input_best_indices = torch.where(  # [Nc]
+                    use_chunk,
+                    chunk_best_indices + codebook_start,
+                    input_best_indices,
+                )
+            best_indices[input_start:input_end] = input_best_indices  # [Nc]
+
+        return best_indices.reshape(input_shape[:-1])  # [...]
+
+    @torch.no_grad()
+    def _tile_with_noise(self, x: torch.Tensor, target_n: int) -> torch.Tensor:
+        """Tile tensor with noise to reach target size.
+
+        Args:
+            x: Input tensor of shape (B, embed_dim).
+            target_n: Target number of rows.
+
+        Returns:
+            Tiled tensor of shape (target_n, embed_dim).
+        """
+        B, embed_dim = x.shape
+        n_repeats = (target_n + B - 1) // B
+        std = x.new_ones(embed_dim) * 0.01 / np.sqrt(embed_dim)
+        x = x.repeat(n_repeats, 1)
+        x = x + torch.rand_like(x) * std
+        return x
+
+    @torch.no_grad()
+    def _update_buffers(self, vectors: torch.Tensor, idxs: torch.Tensor) -> None:
+        """Update EMA buffers with current batch.
+
+        Args:
+            vectors: Feature vectors of shape (..., embed_dim).
+            idxs: Codebook indices of shape (...,).
+        """
+        n_embed, embed_dim = self.weight.shape[0] - 1, self.weight.shape[-1]
+
+        vectors = vectors.reshape(-1, embed_dim).to(dtype=self.embed_ema.dtype)  # [N,E]
+        idxs = idxs.reshape(-1).long()  # [N]
+
+        n_vectors = vectors.shape[0]
+        cluster_size = torch.bincount(idxs, minlength=n_embed).to(dtype=self.cluster_size_ema.dtype)  # [K]
+        vectors_sum_per_cluster = torch.zeros_like(self.embed_ema)  # [K,E]
+        # PyTorch selects its deterministic CUDA implementation here when deterministic algorithms are enabled.
+        vectors_sum_per_cluster.index_add_(0, idxs, vectors)  # [K,E]
+
+        # Collectives are no-ops at world size one. Skipping them also avoids
+        # backend/device mismatches such as CPU tensors with an NCCL group.
+        is_multi_rank: bool = dist.is_initialized() and dist.get_world_size() > 1
+        if is_multi_rank:
+            dist.all_reduce(vectors_sum_per_cluster, op=dist.ReduceOp.SUM)
+            dist.all_reduce(cluster_size, op=dist.ReduceOp.SUM)
+
+        self.cluster_size_ema.mul_(self.decay).add_(cluster_size, alpha=1 - self.decay)
+        self.embed_ema.mul_(self.decay).add_(vectors_sum_per_cluster, alpha=1 - self.decay)
+
+        if self.restart_unused_codes:
+            if n_vectors < n_embed:
+                vectors = self._tile_with_noise(vectors, n_embed)
+            n_vectors = vectors.shape[0]
+            _vectors_random = vectors[torch.randperm(n_vectors, device=vectors.device)][:n_embed]
+
+            if is_multi_rank:
+                dist.broadcast(_vectors_random, 0)
+
+            usage = (self.cluster_size_ema.view(-1, 1) >= 1).float()
+            self.embed_ema.mul_(usage).add_(_vectors_random * (1 - usage))
+            self.cluster_size_ema.mul_(usage.view(-1))
+            self.cluster_size_ema.add_(torch.ones_like(self.cluster_size_ema) * (1 - usage).view(-1))
+
+    @torch.no_grad()
+    def _update_embedding(self) -> None:
+        """Update codebook embeddings from EMA buffers."""
+        n_embed = self.weight.shape[0] - 1
+        n = self.cluster_size_ema.sum()
+        normalized_cluster_size = n * (self.cluster_size_ema + self.eps) / (n + n_embed * self.eps)
+        self.weight[:-1, :] = self.embed_ema / normalized_cluster_size.reshape(-1, 1)
+
+    def forward(self, inputs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Forward pass: quantize inputs to nearest codebook entries.
+
+        Args:
+            inputs: Input tensor of shape (..., embed_dim).
+
+        Returns:
+            Tuple of (quantized embeddings, codebook indices).
+        """
+        embed_idxs = self.find_nearest_embedding(inputs)
+
+        if self.training:
+            if self.ema:
+                self._update_buffers(inputs, embed_idxs)
+
+        embeds = self.embed(embed_idxs).to(dtype=inputs.dtype)  # [...,E]
+
+        if self.ema and self.training:
+            self._update_embedding()
+
+        return embeds, embed_idxs
+
+    def embed(self, idxs: torch.Tensor) -> torch.Tensor:
+        """Look up embeddings by indices.
+
+        Args:
+            idxs: Index tensor.
+
+        Returns:
+            Embedding tensor.
+        """
+        embeds = super().forward(idxs)
+        return embeds
+
+
+class RQBottleneck(nn.Module):
+    """Residual Quantization bottleneck.
+
+    Quantization bottleneck via Residual Quantization. Each codebook
+    quantizes the residual from previous codebooks, enabling hierarchical
+    discrete representations.
+
+    Args:
+        latent_shape: Shape of latent features (H, W, D).
+        code_shape: Shape of codes (h, w, d).
+        n_embed: Number of embeddings per codebook (int or list).
+        decay: EMA decay rate (float or list).
+        shared_codebook: Whether to share codebook across depth.
+        restart_unused_codes: Whether to restart unused codes.
+        commitment_loss: Type of commitment loss ("cumsum").
+        distance_chunk_size: Maximum input/codebook rows in each distance tile.
+    """
+
+    def __init__(
+        self,
+        latent_shape: tuple[int, int, int],
+        code_shape: tuple[int, int, int],
+        n_embed: int | list[int],
+        decay: float | list[float] = 0.99,
+        shared_codebook: bool = False,
+        restart_unused_codes: bool = True,
+        commitment_loss: str = "cumsum",
+        distance_chunk_size: int | None = 4096,
+    ) -> None:
+        """Initialize RQBottleneck."""
+        super().__init__()
+
+        if not len(code_shape) == len(latent_shape) == 3:
+            raise ValueError("incompatible code shape or latent shape")
+        if any([y % x != 0 for x, y in zip(code_shape[:2], latent_shape[:2])]):
+            raise ValueError("incompatible code shape or latent shape")
+
+        # Residual quantization does not divide feature dims for quantization
+        embed_dim = np.prod(latent_shape[:2]) // np.prod(code_shape[:2]) * latent_shape[2]
+
+        self.latent_shape = torch.Size(latent_shape)
+        self.code_shape = torch.Size(code_shape)
+        self.shape_divisor = torch.Size([latent_shape[i] // code_shape[i] for i in range(len(latent_shape))])
+
+        self.shared_codebook = shared_codebook
+        if self.shared_codebook:
+            if isinstance(n_embed, Iterable) or isinstance(decay, Iterable):
+                raise ValueError(
+                    "Shared codebooks are incompatible with list types of momentums or sizes: Change it into int"
+                )
+
+        self.restart_unused_codes = restart_unused_codes
+        self.n_embed = n_embed if isinstance(n_embed, Iterable) else [n_embed for _ in range(self.code_shape[-1])]
+        self.decay = decay if isinstance(decay, Iterable) else [decay for _ in range(self.code_shape[-1])]
+        assert len(self.n_embed) == self.code_shape[-1]
+        assert len(self.decay) == self.code_shape[-1]
+
+        if self.shared_codebook:
+            codebook0 = VQEmbedding(
+                self.n_embed[0],
+                embed_dim,
+                decay=self.decay[0],
+                restart_unused_codes=restart_unused_codes,
+                distance_chunk_size=distance_chunk_size,
+            )
+            self.codebooks = nn.ModuleList([codebook0 for _ in range(self.code_shape[-1])])
+        else:
+            codebooks = [
+                VQEmbedding(
+                    self.n_embed[idx],
+                    embed_dim,
+                    decay=self.decay[idx],
+                    restart_unused_codes=restart_unused_codes,
+                    distance_chunk_size=distance_chunk_size,
+                )
+                for idx in range(self.code_shape[-1])
+            ]
+            self.codebooks = nn.ModuleList(codebooks)
+
+        self.commitment_loss = commitment_loss
+
+    def to_code_shape(self, x: torch.Tensor) -> torch.Tensor:
+        """Reshape dense latent features to code-grid feature vectors."""
+        embed_dim = self.codebooks[0].weight.shape[-1]
+        if x.ndim == 2 and x.shape[-1] == embed_dim:
+            return x  # [N,E]
+
+        if x.ndim != 4 or tuple(x.shape[1:]) != tuple(self.latent_shape):
+            raise ValueError(
+                f"Expected latent shape [B,{tuple(self.latent_shape)}] or [N,{embed_dim}], got {tuple(x.shape)}."
+            )
+
+        batch_size = x.shape[0]
+        latent_h, latent_w, latent_dim = [int(dim) for dim in self.latent_shape]
+        code_h, code_w, _ = [int(dim) for dim in self.code_shape]
+        height_factor = latent_h // code_h
+        width_factor = latent_w // code_w
+
+        x = x.reshape(batch_size, code_h, height_factor, code_w, width_factor, latent_dim)  # [B,h,Hs,w,Ws,D]
+        x = x.permute(0, 1, 3, 2, 4, 5).contiguous()  # [B,h,w,Hs,Ws,D]
+        return x.reshape(batch_size, code_h, code_w, embed_dim)  # [B,h,w,E]
+
+    def to_latent_shape(self, embeds: torch.Tensor) -> torch.Tensor:
+        """Reshape code-grid embeddings back to dense latent layout."""
+        embed_dim = self.codebooks[0].weight.shape[-1]
+        if embeds.ndim == 2 and embeds.shape[-1] == embed_dim:
+            return embeds  # [N,E]
+
+        code_h, code_w, _ = [int(dim) for dim in self.code_shape]
+        if embeds.ndim != 4 or tuple(embeds.shape[1:3]) != (code_h, code_w) or embeds.shape[-1] != embed_dim:
+            raise ValueError(
+                f"Expected code embedding shape [B,{code_h},{code_w},{embed_dim}] or [N,{embed_dim}], "
+                f"got {tuple(embeds.shape)}."
+            )
+
+        batch_size = embeds.shape[0]
+        latent_h, latent_w, latent_dim = [int(dim) for dim in self.latent_shape]
+        height_factor = latent_h // code_h
+        width_factor = latent_w // code_w
+
+        embeds = embeds.reshape(batch_size, code_h, code_w, height_factor, width_factor, latent_dim)  # [B,h,w,Hs,Ws,D]
+        embeds = embeds.permute(0, 1, 3, 2, 4, 5).contiguous()  # [B,h,Hs,w,Ws,D]
+        return embeds.reshape(batch_size, latent_h, latent_w, latent_dim)  # [B,H,W,D]
+
+    def _embed_code_slices(self, code: torch.Tensor) -> list[torch.Tensor]:
+        """Look up per-depth codebook embeddings without summing codebook depth."""
+        if code.shape[-1] != self.code_shape[-1]:
+            raise ValueError(f"Expected code depth {self.code_shape[-1]}, got code shape {tuple(code.shape)}.")
+
+        code = code.long()  # [...,Dq]
+        code_slices = torch.chunk(code, chunks=code.shape[-1], dim=-1)  # list[[...,1]]
+
+        if self.shared_codebook:
+            embeds = [self.codebooks[0].embed(code_slice) for code_slice in code_slices]  # list[[...,1,E]]
+        else:
+            embeds = [
+                self.codebooks[i].embed(code_slice) for i, code_slice in enumerate(code_slices)
+            ]  # list[[...,1,E]]
+
+        return embeds
+
+    def get_codes_from_indices(self, indices: torch.Tensor) -> torch.Tensor:
+        """Decode flat residual-quantizer indices to summed embedding vectors."""
+        if indices.ndim == 1:
+            if self.code_shape[-1] != 1:
+                raise ValueError(
+                    f"Flat indices require one codebook, but this RQ bottleneck has depth {self.code_shape[-1]}."
+                )
+            indices = indices.unsqueeze(-1)  # [N,1]
+
+        embeds = self._embed_code_slices(indices)  # list[[...,1,E]]
+        return torch.cat(embeds, dim=-2).sum(-2)  # [...,E]
+
+    def quantize(self, x: torch.Tensor) -> tuple[list[torch.Tensor], torch.Tensor]:
+        """Quantize input using residual quantization.
+
+        The code is selected by the residuals between x and quantized
+        features by the previous codebooks.
+
+        Args:
+            x: Bottleneck feature maps to quantize, shape (N, embed_dim).
+
+        Returns:
+            Tuple of:
+                - quant_list: List of sequentially aggregated quantized features.
+                - codes: Codeword indices, shape (N, d).
+        """
+        N, embed_dim = x.shape
+
+        residual_feature = x.detach().clone()
+
+        quant_list = []
+        code_list = []
+        aggregated_quants = torch.zeros_like(x)
+        for i in range(self.code_shape[-1]):
+            quant, code = self.codebooks[i](residual_feature)
+            residual_feature.sub_(quant)
+            aggregated_quants.add_(quant)
+
+            quant_list.append(aggregated_quants.clone())
+            code_list.append(code.unsqueeze(-1))
+
+        codes = torch.cat(code_list, dim=-1)
+        return quant_list, codes
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Forward pass for RQ bottleneck.
+
+        Args:
+            x: Input features, shape (N, embed_dim).
+
+        Returns:
+            Tuple of (quantized output, codes, commitment loss).
+        """
+        quant_list, codes = self.quantize(x)
+        commitment_loss = self.compute_commitment_loss(x, quant_list)
+        quants_trunc = quant_list[-1]
+        quants_trunc = x + (quants_trunc - x).detach()
+
+        return quants_trunc, codes, commitment_loss
+
+    def compute_commitment_loss(self, x: torch.Tensor, quant_list: list[torch.Tensor]) -> torch.Tensor:
+        """Compute commitment loss for residual quantization.
+
+        The loss is iteratively computed by aggregating quantized features.
+
+        Args:
+            x: Original input features.
+            quant_list: List of quantized features at each depth.
+
+        Returns:
+            Commitment loss scalar.
+        """
+        loss_list = []
+
+        for idx, quant in enumerate(quant_list):
+            partial_loss = (x - quant.detach()).pow(2.0).mean()
+            loss_list.append(partial_loss)
+
+        commitment_loss = torch.mean(torch.stack(loss_list))
+        return commitment_loss
+
+    @torch.no_grad()
+    def embed_code(self, code: torch.Tensor) -> torch.Tensor:
+        """Decode codes to embeddings.
+
+        Args:
+            code: Code tensor of shape (B, h, w, d) or flat shape (N, d).
+
+        Returns:
+            Embedded features of shape (B, H, W, D) or flat shape (N, embed_dim).
+        """
+        if code.ndim == 2:
+            return self.get_codes_from_indices(code)  # [N,E]
+
+        if tuple(code.shape[1:]) != tuple(self.code_shape):
+            raise ValueError(
+                f"Expected code shape [B,{tuple(self.code_shape)}] or [N,{self.code_shape[-1]}], "
+                f"got {tuple(code.shape)}."
+            )
+
+        embeds = self.get_codes_from_indices(code)  # [B,h,w,E]
+        embeds = self.to_latent_shape(embeds)  # [B,H,W,D]
+
+        return embeds
+
+    @torch.no_grad()
+    def embed_code_with_depth(self, code: torch.Tensor, to_latent_shape: bool = False) -> tuple[torch.Tensor, None]:
+        """Decode codes without reducing over depth dimension.
+
+        Does not reduce the code embedding over the axis of code-depth.
+
+        Args:
+            code: Code tensor.
+            to_latent_shape: Whether to reshape to latent shape.
+
+        Returns:
+            Tuple of (embedded features, None).
+        """
+        embeds = self._embed_code_slices(code)  # list[[...,1,E]]
+
+        if to_latent_shape:
+            embeds = [self.to_latent_shape(embed.squeeze(-2)).unsqueeze(-2) for embed in embeds]  # list[[B,H,W,1,D]]
+        embeds = torch.cat(embeds, dim=-2)  # [...,Dq,E] or [B,H,W,Dq,D]
+
+        return embeds, None
+
+    @torch.no_grad()
+    def embed_partial_code(
+        self,
+        code: torch.Tensor,
+        code_idx: int,
+        decode_type: str = "select",
+    ) -> torch.Tensor:
+        """Decode input codes using subset of codebooks.
+
+        Args:
+            code: Codes of input, shape (B, h, w, d).
+            code_idx: Index of the last selected codebook for decoding.
+            decode_type: "select" for single codebook, "add" for cumulative.
+
+        Returns:
+            Quantized feature map.
+        """
+        if tuple(code.shape[1:]) != tuple(self.code_shape):
+            raise ValueError(f"Expected code shape [B,{tuple(self.code_shape)}], got {tuple(code.shape)}.")
+        if code_idx >= code.shape[-1]:
+            raise ValueError(f"code_idx must be smaller than code depth {code.shape[-1]}, got {code_idx}.")
+
+        B, h, w, _ = code.shape
+
+        embeds = self._embed_code_slices(code)  # list[[B,h,w,1,E]]
+
+        if decode_type == "select":
+            embeds = embeds[code_idx].view(B, h, w, -1)  # [B,h,w,E]
+        elif decode_type == "add":
+            embeds = torch.cat(embeds[: code_idx + 1], dim=-2).sum(-2)  # [B,h,w,E]
+        else:
+            raise NotImplementedError(f"{decode_type} is not implemented in partial decoding")
+
+        embeds = self.to_latent_shape(embeds)  # [B,H,W,D]
+
+        return embeds
+
+    @torch.no_grad()
+    def get_soft_codes(
+        self,
+        x: torch.Tensor,
+        temp: float = 1.0,
+        stochastic: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Get soft codes (probabilities) from input.
+
+        Args:
+            x: Input features.
+            temp: Temperature for softmax.
+            stochastic: Whether to sample from distribution.
+
+        Returns:
+            Tuple of (soft codes, hard codes).
+        """
+        x = self.to_code_shape(x)  # [N,E] or [B,h,w,E]
+
+        residual_feature = x.detach().clone()  # [N,E] or [B,h,w,E]
+        soft_code_list = []
+        code_list = []
+
+        n_codebooks = self.code_shape[-1]
+        for i in range(n_codebooks):
+            codebook = self.codebooks[i]
+            distances = codebook.compute_distances(residual_feature)  # [N,K] or [B,h,w,K]
+            soft_code = F.softmax(-distances / temp, dim=-1)  # [N,K] or [B,h,w,K]
+
+            if stochastic:
+                soft_code_flat = soft_code.reshape(-1, soft_code.shape[-1])  # [M,K]
+                code = torch.multinomial(soft_code_flat, 1)  # [M,1]
+                code = code.reshape(*soft_code.shape[:-1])  # [N] or [B,h,w]
+            else:
+                code = distances.argmin(dim=-1)  # [N] or [B,h,w]
+            quants = codebook.embed(code)  # [N,E] or [B,h,w,E]
+            residual_feature -= quants  # [N,E] or [B,h,w,E]
+
+            code_list.append(code.unsqueeze(-1))
+            soft_code_list.append(soft_code.unsqueeze(-2))
+
+        code = torch.cat(code_list, dim=-1)  # [N,Dq] or [B,h,w,Dq]
+        soft_code = torch.cat(soft_code_list, dim=-2)  # [N,Dq,K] or [B,h,w,Dq,K]
+        return soft_code, code

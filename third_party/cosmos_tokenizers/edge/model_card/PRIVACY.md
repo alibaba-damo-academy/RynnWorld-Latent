@@ -1,0 +1,6 @@
+## Privacy
+| Privacy Information |
+|---|
+| The model was trained on large-scale publicly available data that may contain images, audio-video, and text relating to people. NVIDIA collected and used this data in compliance with applicable data protection and privacy laws. This model was not designed to derive insights or otherwise learn from any personal data contained in the datasets. |
+| NVIDIA uses a combination of filters, data minimization techniques, and other guardrails to help prevent personal data from being recited by our models. We employ automated tools and data processing techniques during pre-training or training to identify and filter certain categories of personal data. For example, for text-bearing source and document components, our automated tools identified potential personal data such as person names, locations, and possible business or public-facing contact information such as email addresses and phone numbers.  We reviewed and removed any verified instances of personal data through a combination of automated filtering and human-in-the-loop validation. |
+| Please review NVIDIA's [Privacy Policy](https://www.nvidia.com/en-us/about-nvidia/privacy-policy/) for more information. |

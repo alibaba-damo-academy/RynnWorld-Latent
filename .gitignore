@@ -1,0 +1,72 @@
+# Run artifacts (checkpoints, videos, logs) — never publish
+outputs/
+*.pt
+*.pth
+*.distcp
+*.metadata
+*.ckpt
+*.safetensors
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.pyo
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Logs & scratch
+*.log
+logs/
+*.tmp.*
+.tmp*
+wandb/
+
+# Crash debris. A 10 GB NCCL watchdog core (core-pt_nccl_watchdg-<pid>-<ts>) once
+# landed inside third_party/cosmos-framework/ untracked and unignored.
+core-[a-z]*
+core.[0-9]*
+*.core
+
+# Credentials and local environment overrides.
+.env
+*.pem
+*.key
+
+# Editor / OS / agent tooling
+.DS_Store
+.idea/
+.vscode/
+.qoder/
+*.swp
+# NFS silly-rename artifacts (a file deleted while still open reappears as .nfsXXXX)
+.nfs*
+
+# Downloaded weights land inside the repo by default (download_weights.sh uses
+# DEST=$REPO_ROOT/weights). The gated NVIDIA snapshot holds more than the
+# *.pt/*.pth/*.safetensors patterns above — config.json, model cards, tokenizer
+# JSON — and convert_edge_to_dcp.py writes a Cosmos3-Edge-dcp/ tree beside it, so
+# ignore the whole directory rather than enumerating extensions.
+weights/
+
+# Bulk data is obtained separately (see README "Weights (gated)"). The single
+# exception is the bundled quickstart sample under data/, re-included below.
+# /data/ is anchored so the tracked scripts/checkpoints/ converter stays visible.
+/data/
+checkpoints/
+!/scripts/checkpoints/
+*.mp4
+*.npz
+
+# Exception: the bundled quickstart samples ship in-repo so a fresh clone trains
+# out of the box. These negations must stay AFTER the /data/, *.mp4 and *.npz
+# rules above (gitignore is last-match-wins).
+!/data/
+/data/*
+!/data/videos/
+!/data/videos/*.mp4
+!/data/latents/
+!/data/latents/*/latent.npz
+!/data/manifest/

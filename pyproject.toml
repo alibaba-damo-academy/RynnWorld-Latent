@@ -1,0 +1,107 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rynnworld-latent"
+version = "0.1.0"
+description = "RynnWorld-Latent: a cross-embodiment world model conditioned on RynnLAM continuous latent actions, built on NVIDIA Cosmos3."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "The RynnWorld-Latent Authors" }]
+keywords = ["world-model", "latent-action", "video-generation", "robotics", "cosmos3"]
+dependencies = [
+    # core: RynnWorld-Latent + RynnLAM
+    # torch 2.11+ hits a torch._dynamo UserError (data-dependent guard) inside the
+    # cosmos forward; 2.10 is the verified line (all cluster training runs on it).
+    "torch>=2.4.0,<2.11",
+    "torchvision>=0.19.0,<0.26",
+    "numpy>=1.24.0,<2",
+    "opencv-python>=4.8.0",
+    "av>=15.0.0,<16.0.0",
+    "einops",
+    "hydra-core",
+    "omegaconf",
+    "attrs",
+    "cattrs",
+    "tyro",
+    "pydantic",
+    "safetensors",
+    "imageio",
+    "imageio-ffmpeg",
+    # transformers 5.x refactored qwen3_vl.video_processing (drops get_image_size),
+    # which the vendored cosmos reasoner/VLM processors import; <5 also keeps
+    # huggingface_hub on the 0.x API cosmos uses.
+    "transformers>=4.57,<5",
+    "diffusers",
+    "filelock",
+    "packaging",
+    "regex",
+    "requests",
+    "loguru",
+    "termcolor",
+    "pillow",
+    # tqdm and huggingface_hub are intentionally not direct deps (SCA compliance);
+    # both arrive transitively via transformers/datasets, and the vendored code
+    # loads tqdm dynamically with a no-op fallback. See requirements.txt / NOTICE.
+    # cosmos-framework runtime closure (imported at load time on the edge path).
+    # Transitive-only packages (portalocker, botocore, braceexpand,
+    # docstring-parser, typeguard, click, protobuf, pyarrow, dill, ...) are
+    # omitted on purpose -- pip resolves them. See requirements.txt for the
+    # rationale and the optional / NVIDIA-image-only pieces.
+    "pyyaml",
+    "iopath",
+    "nvidia-ml-py",
+    "psutil",
+    # boto3 is an import-time requirement of the vendored cosmos-framework
+    # (utils.config -> object_store -> easy_io transient_retry import it
+    # unconditionally under COSMOS_TRAINING). RynnWorld-Latent's own code never
+    # calls any S3/GCS API: checkpoints are local-only and
+    # enable_gcs_patch_in_boto3=False. Kept because NOTICE requires the vendored
+    # subtree stay byte-identical to upstream. See requirements.txt.
+    "boto3",
+    "accelerate",
+    "datasets",
+    "pandas",
+    "pytz",
+    "matplotlib",
+    "scipy",
+    "qwen-vl-utils",
+    "webdataset",
+    "soundfile",
+    "wandb>=0.17,<0.28.2",
+    "ftfy",
+    "tiktoken",
+    "rich",
+    "tabulate",
+    "opt-einsum",
+    "zstandard",
+]
+
+[project.optional-dependencies]
+# Needed only to read the non-file video sources that RynnLAM's FrameReader
+# supports: zarr directories (EgoVerse) and hdf5 (RoboMIND). Plain mp4/webm
+# needs nothing beyond `av`.
+#
+# zarr and numcodecs must be a matched PAIR: numcodecs 0.16 renamed
+# blosc.cbuffer_sizes, which zarr 2.x imports at module load, so (zarr<3 with
+# numcodecs>=0.16) and (zarr>=3 with numcodecs<0.16) each break `import zarr` —
+# and with it the whole zarr backend, because rynnlam imports zarr before
+# reaching its own fallback reader. The EgoVerse stores are zarr_format=3, so
+# this pins the (zarr>=3, numcodecs>=0.16) side of that pair.
+video-sources = ["zarr>=3", "numcodecs>=0.16", "h5py"]
+# cosmos_framework.inference.ray serving only; not needed for training or
+# scripts/inference/rollout.py.
+serve = ["ray"]
+
+[tool.setuptools]
+# cosmos-framework is VENDORED under third_party/ (added to PYTHONPATH by
+# scripts/train.sh), not a PyPI dependency -- it is not published to PyPI.
+include-package-data = false
+license-files = ["LICENSE", "NOTICE"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rynnworld_latent*"]
+exclude = ["tests*", "examples*", "scripts*", "third_party*", "rynnlam*"]

@@ -1,0 +1,115 @@
+# Runtime dependencies for RynnWorld-Latent (Cosmos3-Edge) + bundled RynnLAM.
+#
+# Authoritative source is pyproject.toml (`pip install -e .`); this file mirrors
+# [project.dependencies] for `pip install -r requirements.txt` workflows. Keep the
+# two in sync.
+#
+# NOTE: this project builds ON TOP OF NVIDIA's cosmos-framework, which is VENDORED
+# under third_party/cosmos-framework (code only) and is NOT on PyPI. Put it on
+# PYTHONPATH instead of installing it (scripts/train.sh does this for you):
+#   export PYTHONPATH="$PWD:$PWD/third_party/cosmos-framework"
+# Model weights are not bundled either -- see scripts/setup/download_weights.sh.
+#
+# The list below is the VERIFIED import closure of the vendored cosmos-framework
+# (config load + video-SFT dataloader + training loop + inference) plus RynnLAM.
+# cosmos-framework is a large framework whose import graph reaches further than a
+# typical video model, so this is longer than the RynnWorld-Latent layer alone --
+# every entry here is imported at load time by code on the edge path. Packages
+# that pip pulls transitively (portalocker<-iopath, botocore<-boto3,
+# braceexpand<-webdataset, docstring-parser/typeguard<-tyro, click/protobuf<-wandb,
+# pyarrow/dill/multiprocess/fsspec/xxhash<-datasets, ...) are intentionally NOT
+# listed. NVIDIA-image-only, non-PyPI, or optional pieces are documented at the
+# bottom instead of pinned here.
+
+# --- core: RynnWorld-Latent + RynnLAM -------------------------------------
+# torch 2.11+ hits a torch._dynamo UserError (data-dependent guard) inside the
+# cosmos forward; 2.10 is the verified line (all cluster training runs on it).
+torch>=2.4.0,<2.11
+torchvision>=0.19.0,<0.26
+numpy>=1.24.0,<2
+opencv-python>=4.8.0
+av>=15.0.0,<16.0.0
+einops
+hydra-core
+omegaconf
+attrs
+cattrs
+tyro
+pydantic
+safetensors
+imageio
+imageio-ffmpeg    # imageio's mp4 writer (rollout video export) needs the ffmpeg
+                  # plugin; without it imageio falls back to PyAV, whose write()
+                  # rejects the `quality` kwarg cosmos passes
+# transformers 5.x refactored qwen3_vl.video_processing (drops get_image_size),
+# which the vendored cosmos reasoner/VLM processors import. The 4.57 line is the
+# verified-working one; <5 also keeps huggingface_hub on the 0.x API cosmos uses.
+transformers>=4.57,<5
+diffusers
+filelock
+packaging
+regex
+requests
+loguru
+termcolor
+pillow
+# NOTE: tqdm and huggingface_hub are intentionally NOT declared as direct
+# dependencies (third-party SCA compliance). Both are pulled in transitively by
+# transformers / datasets, and the vendored code loads tqdm dynamically with a
+# no-op fallback (see NOTICE). transformers<5 keeps huggingface_hub on the 0.x
+# API cosmos uses, so no explicit pin is needed here.
+
+# --- cosmos-framework runtime closure (imported at load time) --------------
+pyyaml              # cosmos serialization/easy_io + RynnLAM config
+iopath              # cosmos lazy_config PathManager (config load)
+nvidia-ml-py        # provides `pynvml`; cosmos device/telemetry monitors
+psutil              # cosmos device_monitor / distributed
+boto3               # IMPORT-TIME requirement of the vendored cosmos-framework
+                    # (cosmos_framework.utils.config -> object_store -> easy_io
+                    # transient_retry import boto3/botocore unconditionally under
+                    # COSMOS_TRAINING, which defaults on). RynnWorld-Latent's OWN
+                    # code never uses it: checkpoints are local-only, the checkpoint
+                    # SKU is `local` (object store disabled), and
+                    # enable_gcs_patch_in_boto3=False, so no S3/GCS API is ever
+                    # called. It cannot be dropped without patching the vendored
+                    # subtree, which NOTICE requires be kept byte-identical to
+                    # upstream. Installed, imported, never exercised.
+accelerate          # cosmos model/generator/hf_model
+datasets            # cosmos data pipeline
+pandas              # cosmos callbacks + easy_io pandas handler
+pytz                # pandas 3.x no longer depends on it; cosmos callbacks import it
+matplotlib          # cosmos callbacks/expert_heatmap imports pyplot at config load
+scipy               # cosmos action pose_utils
+qwen-vl-utils       # cosmos reasoner/VLM processors (smart_resize)
+webdataset          # cosmos joint_dataloader
+soundfile           # cosmos media/audio decode path
+wandb>=0.17,<0.28.2  # cosmos callbacks import it at module load (even when disabled);
+                    # 0.28.2 dropped wandb.util.generate_id, which cosmos wandb_util calls
+ftfy                # text normalization on the processor path
+tiktoken            # tokenizer path
+rich                # console/config pretty-printing
+tabulate            # cosmos table formatting
+opt-einsum          # einsum optimization on the model path
+zstandard           # compression on the cosmos IO path
+
+# --- optional extras (install via pyproject) -------------------------------
+#   pip install -e ".[video-sources]"   # read non-file video sources
+#   pip install -e ".[serve]"           # cosmos ray-based inference serving
+#
+#   video-sources: zarr>=3, numcodecs>=0.16, h5py
+#                  Only to read the non-file video sources RynnLAM's FrameReader
+#                  supports: zarr directories (EgoVerse) and hdf5 (RoboMIND).
+#                  Plain mp4/webm needs nothing beyond `av`. zarr and numcodecs
+#                  must be a matched PAIR (see pyproject.toml for why).
+#   serve:         ray -- cosmos_framework.inference.ray serving only; not needed
+#                  for training or scripts/inference/rollout.py.
+#
+# NOT pip-installable / provided by the NVIDIA cosmos docker image, and OPTIONAL
+# for this recipe (the code guards them or train.py patches around them):
+#   apex                  -- guarded (try/except); FastLayerNorm fast path only
+#   flash_attn / natten / transformer_engine
+#                         -- train.py registers an SDPA varlen fallback, so a
+#                            missing flash-attn backend does not block training
+#   multistorageclient    -- guarded; only the MSC object-store easy_io backend
+#   lerobot               -- train.py installs an inert stub (RynnWorld does not
+#                            use lerobot datasets)

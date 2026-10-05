@@ -1,0 +1,81 @@
+# ============================================================================
+# RynnWorld-Latent — Cosmos3-Edge manifest recipe, single GPU (local smoke).
+#
+# Uses the `rynnworld_latent_edge_manifest` experiment, which trains only the generation
+# branch plus the action heads (the optimizer.keys_to_select allowlist). Data comes
+# from the chunk manifest (e.g. the bundled data/manifest) — no materialized
+# episodes, and no staging required locally: the dataset reads the original source
+# videos directly when STAGED_ROOT is empty.
+#
+# Env required:
+#   MANIFEST_DIR=/path/to/manifest
+#   STAGED_ROOT=""                      # empty -> read original source videos
+#   BASE_CHECKPOINT_PATH=<Cosmos3-Edge DCP dir>
+#   WAN_VAE_PATH=<Wan2.2_VAE.pth>
+#   IMAGINAIRE_OUTPUT_ROOT=/path/to/output
+#
+# Launch:
+#   NGPU=1 TOML=configs/examples/edge_manifest_local.toml bash scripts/train.sh \
+#       optimizer.optimizer_type=adamw optimizer.fused=true \
+#       dataloader_train.dataloader.batch_size=1 \
+#       dataloader_train.dataloader.num_workers=6
+# ============================================================================
+
+[job]
+task         = "vfm"
+experiment   = "rynnworld_latent_edge_manifest"
+project      = "rynnworld_latent"
+group        = "rynnworld_latent_sft"
+name         = "rynnworld_latent_edge_manifest_local"
+wandb_mode   = "disabled"
+
+[model]
+precision = "bfloat16"
+
+[model.parallelism]
+data_parallel_shard_degree     = 1
+data_parallel_replicate_degree = 1
+
+[model.activation_checkpointing]
+mode           = "full"
+save_ops_regex = ["fmha"]
+
+[model.tokenizer]
+vae_path = "${oc.env:WAN_VAE_PATH}"
+
+[model.compile]
+# OFF, same as the full-FT recipe. The SDPA attention fallback
+# (rynnworld_latent/attention_sdpa_fallback.py) branches on a data-dependent
+# comparison (q_e <= q_s) that torch.compile cannot guard on with dynamic shapes
+# (GuardOnDataDependentSymNode), and dynamo's suppress_errors does not catch it.
+# Compile affects speed only, never correctness; flip per run with
+# model.compile.enabled=true once measured on an image with flash_attn.
+enabled = false
+
+[optimizer]
+# LOCAL: transformer_engine (FusedAdam) is absent here, so pass
+# optimizer.optimizer_type=adamw optimizer.fused=true as CLI overrides.
+lr = 2.0e-04
+
+[scheduler]
+# cycle_lengths must equal trainer.max_iter (below) or the LambdaLinear schedule
+# never anneals. scripts/train_8gpu.sh's quickstart overrides both together.
+cycle_lengths = [60]
+warm_up_steps = [20]
+
+[dataloader_train]
+max_samples_per_batch = 1
+
+[trainer]
+max_iter        = 60
+logging_iter    = 1
+grad_accum_iter = 1
+
+[trainer.callbacks.compile_tokenizer]
+# Off: the one-time AOT tokenizer compile costs ~8 min for a short local run.
+enabled            = false
+warmup_resolutions = ["480"]
+
+[checkpoint]
+load_path = "${oc.env:BASE_CHECKPOINT_PATH}"
+save_iter = 999999

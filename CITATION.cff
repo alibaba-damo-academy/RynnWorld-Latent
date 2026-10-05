@@ -1,0 +1,61 @@
+# CITATION.cff
+cff-version: 1.2.0
+type: software
+title: "RynnWorld-Latent: A Cross-Embodiment World Model Conditioned on Universal Latent Actions"
+message: "If you use this software, please cite the paper below."
+authors:
+  - given-names: "Haoyu"
+    family-names: "Zhao"
+  - given-names: "Yinzhou"
+    family-names: "Tang"
+  - given-names: "Zixuan"
+    family-names: "Wang"
+  - given-names: "Xingyue"
+    family-names: "Zhao"
+  - given-names: "Qin"
+    family-names: "Zhao"
+  - given-names: "Kehan"
+    family-names: "Li"
+  - given-names: "Siteng"
+    family-names: "Huang"
+  - given-names: "Xin"
+    family-names: "Li"
+  - given-names: "Zhongyu"
+    family-names: "Li"
+version: "0.1.0"
+license: Apache-2.0
+repository-code: "https://github.com/alibaba-damo-academy/RynnWorld-Latent"
+url: "https://alibaba-damo-academy.github.io/RynnWorld-Latent.github.io"
+keywords:
+  - world-model
+  - latent-action
+  - video-generation
+  - robotics
+  - cosmos3
+
+# Preferred citation: the RynnWorld-Latent paper.
+preferred-citation:
+  type: article
+  title: "RynnWorld-Latent: A Cross-Embodiment World Model Conditioned on Universal Latent Actions"
+  authors:
+    - given-names: "Haoyu"
+      family-names: "Zhao"
+    - given-names: "Yinzhou"
+      family-names: "Tang"
+    - given-names: "Zixuan"
+      family-names: "Wang"
+    - given-names: "Xingyue"
+      family-names: "Zhao"
+    - given-names: "Qin"
+      family-names: "Zhao"
+    - given-names: "Kehan"
+      family-names: "Li"
+    - given-names: "Siteng"
+      family-names: "Huang"
+    - given-names: "Xin"
+      family-names: "Li"
+    - given-names: "Zhongyu"
+      family-names: "Li"
+  year: 2026
+  notes: "Preprint. Conditioned on RynnLAM latent actions; built on NVIDIA Cosmos3."
+  url: "https://github.com/alibaba-damo-academy/RynnWorld-Latent"

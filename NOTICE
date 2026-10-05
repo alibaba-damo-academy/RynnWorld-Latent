@@ -1,0 +1,86 @@
+RynnWorld-Latent
+================
+
+Copyright (c) 2026 The RynnWorld-Latent Authors.
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product bundles third-party components under their own licenses. The
+full texts and per-component attributions are in the directories named below
+and summarized in THIRD_PARTY_LICENSES.md.
+
+------------------------------------------------------------------------
+third_party/cosmos-framework, third_party/cosmos_tokenizers
+------------------------------------------------------------------------
+NVIDIA Cosmos / Cosmos3 tokenizer code and text-tokenizer assets.
+Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES.
+License: NVIDIA Open Model License Agreement v1.1 (OpenMDW-1.1).
+See: third_party/cosmos-framework/LICENSE
+     third_party/cosmos-framework/NOTICE
+     third_party/cosmos-framework/ATTRIBUTIONS.md
+RynnWorld-Latent is built on top of cosmos-framework (the MoT / flow-matching
+training stack). Model WEIGHTS are NOT redistributed here; obtain them via
+scripts/setup/download_weights.sh (nvidia/Cosmos3-Edge).
+That subtree also contains one GPL-3.0 file inherited from upstream
+(cosmos_framework/model/generator/utils/taylorseer.py), attributed in its own
+NOTICE; see THIRD_PARTY_LICENSES.md.
+
+------------------------------------------------------------------------
+rynnlam/  (top-level bundled component)
+------------------------------------------------------------------------
+RynnLAM latent-action models -- the LAM series work that produces the
+continuous latent actions RynnWorld-Latent is conditioned on.
+License: Apache License, Version 2.0.
+See: rynnlam/LICENSE, rynnlam/NOTICE
+RynnLAM itself bundles DA3 / DINOv2-derived backbone code
+Copyright (c) Meta Platforms, Inc. and affiliates,
+Copyright (c) 2025 ByteDance Ltd. and/or its affiliates (Apache-2.0),
+and references DINO, pytorch-image-models, CodeLlama and rope-vit.
+See rynnlam/NOTICE for the full attribution.
+
+------------------------------------------------------------------------
+Backbones / tokenizer weights (downloaded separately, not redistributed)
+------------------------------------------------------------------------
+Cosmos3-Edge (Nemotron-2B) and the Wan2.2 video VAE.
+These derive from NVIDIA Cosmos and retain their original NVIDIA licenses and
+the Qwen/HuggingFace (Apache-2.0) notices recorded in
+third_party/cosmos-framework/NOTICE.
+
+------------------------------------------------------------------------
+Language
+------------------------------------------------------------------------
+All code, comments and documentation authored by this project are in English.
+The only CJK text remaining anywhere in this tree is inside the vendored
+third_party/cosmos-framework subtree (two upstream code comments and one
+fullwidth character that is part of a regular expression).
+
+------------------------------------------------------------------------
+Vendored subtree vs. upstream
+------------------------------------------------------------------------
+The vendored third_party/cosmos-framework subtree is otherwise kept as close to
+NVIDIA's release as possible so it stays diffable against upstream. The local
+additions are limited to:
+
+1. A "Provenance reference (composition scan ...)" comment block prepended to the
+   files a third-party composition scan flagged as high-similarity (>=80%) to
+   public repositories. Each block only records the scanner's nearest-repo match
+   and the file's actual in-header license; it changes no code.
+2. The module-level `tqdm` and `huggingface_hub` imports in library code
+   (face_blur_filter.py, dc_ae/dc_ae_v.py, utils/callback.py, utils/progress_bar.py
+   for tqdm; data/generator/action/datasets/cosmos3_action_lerobot.py for
+   huggingface_hub) are loaded dynamically via `importlib.import_module(...)`
+   inside try/except, so neither is a static import-time dependency. tqdm degrades
+   to a no-op progress bar when absent; the huggingface_hub constant is only used
+   to force HF Hub offline mode and is skipped when unavailable. Accordingly,
+   `tqdm` and `huggingface_hub` are NOT declared as direct dependencies in
+   requirements.txt / pyproject.toml / rynnlam/pyproject.toml -- both still arrive
+   transitively via transformers/datasets, so behavior is unchanged when they are
+   installed.
+3. Clarifying comments and an inert placeholder endpoint
+   (https://example.test/v1) in inference/prompt_upsampling_test.py, replacing a
+   real-looking external API URL in a fully mocked unit test that never opens a
+   socket.
+
+To diff a flagged file against upstream, ignore the leading provenance comment
+block. The full scan list and license reconciliation is in THIRD_PARTY_LICENSES.md
+("Composition-scan review").

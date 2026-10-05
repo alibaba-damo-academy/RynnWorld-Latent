@@ -1,0 +1,24 @@
+RynnLAM
+
+This source distribution includes third-party code whose original copyright
+and license notices remain in the corresponding files.
+
+DA3 / DINOv2-derived backbone implementation
+  Files: rynnlam/modules/dinov2/
+  Copyright (c) Meta Platforms, Inc. and affiliates.
+  Copyright (c) 2025 ByteDance Ltd. and/or its affiliates.
+  License stated in the inherited source headers: Apache License, Version 2.0.
+  The source also records references to DINO, pytorch-image-models, CodeLlama,
+  and rope-vit. Those reference notices have been retained.
+
+Logger
+  File: rynnlam/logger.py
+  Copyright (c) 2025 ByteDance Ltd. and/or its affiliates.
+  License: Apache License, Version 2.0.
+  Modified for use as the RynnLAM package logger.
+
+The Apache License text is included in LICENSE. This source distribution does
+not bundle model weights, datasets, private cluster tooling, or external
+benchmark implementations. Their licenses and access terms are separate from
+this source license. Obtaining a checkpoint does not grant permission to
+redistribute its training data or third-party weights.
