@@ -352,8 +352,15 @@ cs.store(
 # stays False (inherited), so the optimizer/scheduler/iteration start fresh while the
 # weights carry over. Data-agnostic: the embodiment is chosen purely by MANIFEST_DIR at
 # launch -- nothing here names a dataset. See configs/posttrain/downstream.toml.
+#
+# Derives from the v3 (fps=None) recipe, NOT _fullft (fps=10.0). The released
+# RynnWorld-Latent weights are a v3 checkpoint and a downstream manifest carries each
+# record's real fps, so pinning 10.0 here would rescale the mRoPE timestep (24/fps) by
+# ~3x and silently misalign against the warm-started weights -- the exact caveat
+# documented on _v3_fullft above. If you instead warm-start from your OWN fps=10.0
+# stage-1 checkpoint, override dataset.fps=10.0 at launch.
 # ---------------------------------------------------------------------------
-rynnworld_latent_edge_posttrain = copy.deepcopy(rynnworld_latent_edge_manifest_fullft)
+rynnworld_latent_edge_posttrain = copy.deepcopy(rynnworld_latent_edge_manifest_v3_fullft)
 rynnworld_latent_edge_posttrain["job"]["name"] = "rynnworld_latent_edge_posttrain"
 rynnworld_latent_edge_posttrain["checkpoint"]["keys_to_skip_loading"] = ["net_ema."]
 
