@@ -96,7 +96,7 @@ Stock action injection collapses to **action-blind, near-still** rollouts, and s
 The full film switch set (used in the Training section below):
 `CFG_DROPOUT=CFG_DROPOUT_HAND=CFG_DROPOUT_CAM=0.1`, `TEXT_FREE=1`, `COND_FORCE=0.3`, `COND_FORCE_FLOOR=0.75`, `FRAME_INJECT=TOWER_SPLIT=FILM=1`.
 
-> **Evaluating a film checkpoint requires exporting the same switch set**, or the model structure will be missing `frame_gate` / `frame_film`. `scripts/inference/rollout.py` loads EMA weights by default; pass `--no-ema` for a run that did not save an EMA.
+> **Evaluating a film checkpoint requires exporting the same switch set**, or the model structure will be missing `frame_gate` / `frame_film`. For a **DCP** checkpoint `scripts/inference/rollout.py` loads EMA weights by default — pass `--no-ema` for a run that did not save an EMA. For a **safetensors** checkpoint (e.g. the released weights in [Inference & evaluation](#inference--evaluation)) `--no-ema` is *required*: the direct loader reads the `net.*` weights and does not map the `net_ema.*` mirrors (EMA-to-regular loading is a DCP-only path).
 
 ---
 
@@ -111,7 +111,7 @@ pip install -e ".[video-sources]"                     # or: pip install -r requi
 export PYTHONPATH="$PWD:$PWD/third_party/cosmos-framework"
 ```
 
-`requirements.txt` is the verified import closure of the vendored cosmos-framework (config load + video-SFT dataloader + training + inference) plus RynnLAM; `pyproject.toml` is authoritative and the two are kept in sync. **Pins matter:** `transformers>=4.57,<5` (5.x refactors `qwen3_vl` and breaks the cosmos processors), `torch>=2.4,<2.11` + `torchvision<0.26` (torch 2.14's dynamo rejects cosmos's forward), `wandb<0.28.2` (0.28.2 dropped `wandb.util.generate_id`), `numpy<2`. `huggingface_hub` and `tqdm` are **not** declared as direct dependencies (third-party SCA compliance): both arrive transitively via `transformers`/`datasets`, and `transformers>=4.57,<5` keeps `huggingface_hub` on the 0.x API cosmos needs; the vendored code loads `tqdm` dynamically with a no-op fallback (see `NOTICE`). For non-file video sources (zarr / hdf5) the `video-sources` extra adds matched `zarr>=3` + `numcodecs>=0.16` + `h5py`; plain mp4/webm needs only `av`. NVIDIA-image-only / optional pieces (`apex`, `flash_attn`/`natten`/`transformer_engine`, `multistorageclient`, `ray`, `lerobot`) are guarded in code or patched around by `scripts/train.py` (SDPA varlen fallback, inert lerobot stub) and are **not** required.
+`requirements.txt` is the verified import closure of the vendored cosmos-framework (config load + video-SFT dataloader + training + inference) plus RynnLAM; `pyproject.toml` is authoritative and the two are kept in sync. **Pins matter:** `transformers>=4.57,<5` (5.x refactors `qwen3_vl` and breaks the cosmos processors), `torch>=2.7,<2.11` + `torchvision>=0.22,<0.26` (2.7 is the floor because the base→DCP converter imports `torch.distributed.checkpoint.hf_storage`, native only in ≥2.7; torch 2.11+'s dynamo rejects cosmos's forward), `wandb<0.28.2` (0.28.2 dropped `wandb.util.generate_id`), `numpy<2`. `huggingface_hub` and `tqdm` are **not** declared as direct dependencies (third-party SCA compliance): both arrive transitively via `transformers`/`datasets`, and `transformers>=4.57,<5` keeps `huggingface_hub` on the 0.x API cosmos needs; the vendored code loads `tqdm` dynamically with a no-op fallback (see `NOTICE`). For non-file video sources (zarr / hdf5) the `video-sources` extra adds matched `zarr>=3` + `numcodecs>=0.16` + `h5py`; plain mp4/webm needs only `av`. NVIDIA-image-only / optional pieces (`apex`, `flash_attn`/`natten`/`transformer_engine`, `multistorageclient`, `ray`, `lerobot`) are guarded in code or patched around by `scripts/train.py` (SDPA varlen fallback, inert lerobot stub) and are **not** required.
 
 ## Weights (gated)
 
@@ -127,7 +127,7 @@ export BASE_CHECKPOINT_PATH=/.../weights/Cosmos3-Edge-dcp
 export WAN_VAE_PATH=/.../weights/Cosmos3-Edge/Wan2.2_VAE.pth
 ```
 
-Request access to the gated repos on their Hugging Face pages first. Weight licenses: see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). **Code plus three bundled sample chunks — no weights are redistributed.**
+Request access to the gated repos on their Hugging Face pages first. Weight licenses: see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). **Code plus three bundled sample chunks — no weights are redistributed in this repo.** The fine-tuned **RynnWorld-Latent** film checkpoint (what you get after training on top of this base) *is* published publicly on Hugging Face / ModelScope — see [Inference & evaluation](#inference--evaluation) to download and roll it out directly.
 
 ---
 
@@ -254,6 +254,35 @@ python scripts/inference/rollout.py --dry-run --manifest-dir "$MANIFEST_DIR" --i
 
 ## Inference & evaluation
 
+### Released film weights (download → roll out, no training)
+
+The fine-tuned **RynnWorld-Latent film checkpoint** (608-dim two-tower action conditioning + frame FiLM) is published publicly. Download it and roll out directly — no training and no DCP conversion:
+
+```bash
+# Hugging Face (China mirror: export HF_ENDPOINT=https://hf-mirror.com)
+python -c "from huggingface_hub import snapshot_download; snapshot_download('Alibaba-DAMO-Academy/RynnWorld-Latent', local_dir='./weights/RynnWorld-Latent')"
+# or ModelScope (pip install modelscope)
+python -c "from modelscope import snapshot_download; snapshot_download('DAMO_Academy/RynnWorld-Latent', local_dir='./weights/RynnWorld-Latent')"
+```
+
+The release ships safetensors in the native Cosmos3 VFM layout — `net.*` (regular) plus `net_ema.*` (EMA) mirrors — and `rollout.py` loads the `net.*` weights straight from the directory. It still needs the gated **Wan2.2 VAE** (from `bash scripts/setup/download_weights.sh`, above → `WAN_VAE_PATH`) and the **film switches** the checkpoint was trained with:
+
+```bash
+export PYTHONPATH="$PWD:$PWD/third_party/cosmos-framework"
+export WAN_VAE_PATH=/path/to/Wan2.2_VAE.pth
+export RYNNWORLD_TEXT_FREE=1 \
+       RYNNWORLD_ACTION_TOWER_SPLIT=1 RYNNWORLD_ACTION_FRAME_INJECT=1 RYNNWORLD_ACTION_FILM=1 \
+       RYNNWORLD_ACTION_CFG_DROPOUT=0.1 RYNNWORLD_ACTION_CFG_DROPOUT_HAND=0.1 RYNNWORLD_ACTION_CFG_DROPOUT_CAM=0.1
+python scripts/inference/rollout.py \
+  --manifest-dir data/manifest \
+  --checkpoint ./weights/RynnWorld-Latent \
+  --indices 0,1,2 --num-steps 35 --guidance 1.5 --no-ema --out /tmp/rollout
+```
+
+`--no-ema` is required here (see the note above): the safetensors loader consumes `net.*` and ignores `net_ema.*`. On the three bundled sample chunks this reproduces **PSNR(gen,gt) ≈ 21–23 dB**, above the 15–22 dB static-first-frame baseline, with motion(gen)/motion(gt) ≈ 1.0–1.3 — i.e. the model predicts real action-conditioned motion rather than copying frame 0.
+
+### Your own trained checkpoint (DCP)
+
 ```bash
 export PYTHONPATH="$PWD:$PWD/third_party/cosmos-framework"
 python scripts/inference/rollout.py \
@@ -262,7 +291,7 @@ python scripts/inference/rollout.py \
   --indices 0,1,2,3 --num-steps 35 --guidance 1.5 --out /tmp/rollout
 ```
 
-It writes `gen_*.mp4` / `gt_*.mp4` and prints per-sample PSNR(gen,gt), the static-first-frame baseline, and the motion ratio. **Export the same film switches used in training.** `--no-ema` for a run that did not save an EMA.
+It writes `gen_*.mp4` / `gt_*.mp4` and prints per-sample PSNR(gen,gt), the static-first-frame baseline, and the motion ratio. **Export the same film switches used in training.** For a DCP checkpoint, EMA loads by default; pass `--no-ema` for a run that did not save an EMA.
 
 ---
 

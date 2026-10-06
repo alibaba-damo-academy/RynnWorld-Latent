@@ -13,10 +13,13 @@ authors = [{ name = "The RynnWorld-Latent Authors" }]
 keywords = ["world-model", "latent-action", "video-generation", "robotics", "cosmos3"]
 dependencies = [
     # core: RynnWorld-Latent + RynnLAM
-    # torch 2.11+ hits a torch._dynamo UserError (data-dependent guard) inside the
-    # cosmos forward; 2.10 is the verified line (all cluster training runs on it).
-    "torch>=2.4.0,<2.11",
-    "torchvision>=0.19.0,<0.26",
+    # torch 2.7 floor: the base->DCP converter imports torch.distributed.checkpoint.
+    # hf_storage (native only in >=2.7; the torch_dcp_hf_backfill shim is NVIDIA-image-
+    # only, not on PyPI). torch 2.11+ hits a torch._dynamo UserError (data-dependent
+    # guard) inside the cosmos forward; 2.10 is the verified line (cluster training).
+    # torchvision floor tracks torch (2.7<->0.22 ... 2.10<->0.25).
+    "torch>=2.7.0,<2.11",
+    "torchvision>=0.22.0,<0.26",
     "numpy>=1.24.0,<2",
     "opencv-python>=4.8.0",
     "av>=15.0.0,<16.0.0",

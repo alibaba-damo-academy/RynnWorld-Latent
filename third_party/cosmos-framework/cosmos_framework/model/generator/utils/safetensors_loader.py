@@ -1647,8 +1647,21 @@ def load_vfm_model(
         # fires at position 0; a nested ``.../model.net/...`` substring
         # somewhere deep in a key (e.g. inside an LM submodule name) is
         # left alone.
+        #
+        # A bare leading ``net.`` is stripped next.  That is the raw
+        # ``OmniMoTModel`` / DCP-training export layout — and the one the
+        # released RynnWorld safetensors ship in (``net.*`` regular weights
+        # plus ``net_ema.*`` EMA mirrors).  After both strips the canonical
+        # VFM keys (``language_model.* / action2llm.* / vae2llm.* / …``)
+        # resolve against ``vfm_state_dict``.  ``net_ema.*`` does not start
+        # with ``net.`` (4th char is ``_``), so it survives both strips and
+        # is ignored as an extra checkpoint key below — the regular ``net.*``
+        # weights are what load, matching ``--no-ema``.
         dest_name = (
-            ckpt_name.removeprefix("model.net.").replace("_orig_mod.", "").replace("_checkpoint_wrapped_module.", "")
+            ckpt_name.removeprefix("model.net.")
+            .removeprefix("net.")
+            .replace("_orig_mod.", "")
+            .replace("_checkpoint_wrapped_module.", "")
         )
 
         if any(p.fullmatch(dest_name) for p in compiled_skip_patterns):
