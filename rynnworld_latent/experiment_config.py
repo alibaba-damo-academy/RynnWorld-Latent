@@ -1,17 +1,22 @@
-"""``rynnworld_latent_edge_manifest[_fullft]`` — Cosmos3-Edge RynnWorld-Latent SFT recipes.
+"""``rynnworld_latent_edge_*`` — Cosmos3-Edge RynnWorld-Latent SFT / post-train recipes.
 
 Trains a forward-dynamics world model conditioned on RynnLAM latent actions
 (608-dim ``ktoken_zcam``: k_tokens 512 | z 64 | camera 32) on the Cosmos3-Edge
 (Nemotron-2B) backbone.
 
-Both registered recipes read chunk records from ``MANIFEST_DIR`` and pixels from
-``STAGED_ROOT`` (or the source videos in place when it is empty); they differ only
-in what trains:
+All recipes read chunk records from ``MANIFEST_DIR`` and pixels from ``STAGED_ROOT``
+(or the source videos in place when it is empty):
 
 * ``rynnworld_latent_edge_manifest`` — generation branch + action heads, via the
-  ``optimizer.keys_to_select`` allowlist.
+  ``optimizer.keys_to_select`` allowlist. Warm-starts from the Cosmos3-Edge base.
 * ``rynnworld_latent_edge_manifest_fullft`` — full-parameter fine-tune of the entire
-  3.37B net. This is the released recipe.
+  3.37B net, fps pinned to 10.0. Warm-starts from the Cosmos3-Edge base.
+* ``rynnworld_latent_edge_manifest_v3_fullft`` — same as ``_fullft`` but ``fps=None``
+  (per-record real fps drives the mRoPE time step). The released weights are a v3
+  checkpoint; see that node's comment for the fps caveat before using it.
+* ``rynnworld_latent_edge_posttrain`` — downstream embodiment post-training: warm-starts
+  from a TRAINED RynnWorld-Latent film checkpoint (not the base) and fine-tunes on your
+  own manifest, preserving the trained action heads (only ``net_ema.`` is skipped).
 
 Usage (1 node, 8 GPU)::
 
@@ -22,6 +27,15 @@ Usage (1 node, 8 GPU)::
     IMAGINAIRE_OUTPUT_ROOT=./outputs \
     torchrun --nproc_per_node=8 scripts/train.py \
         --sft-toml configs/train/edge_fullft.toml
+
+Downstream post-train (warm-start from a trained film checkpoint, your own embodiment)::
+
+    MANIFEST_DIR=/path/to/your/embodiment/manifest \
+    BASE_CHECKPOINT_PATH=<trained film DCP dir, containing model/> \
+    WAN_VAE_PATH=<Wan2.2_VAE.pth> \
+    IMAGINAIRE_OUTPUT_ROOT=./outputs \
+    torchrun --nproc_per_node=8 scripts/train.py \
+        --sft-toml configs/posttrain/downstream.toml
 """
 
 import copy
@@ -291,4 +305,61 @@ cs.store(
     package="_global_",
     name="rynnworld_latent_edge_manifest_fullft",
     node=rynnworld_latent_edge_manifest_fullft,
+)
+
+
+# ---------------------------------------------------------------------------
+# Full-corpus (v3) recipe: identical to edge_manifest_fullft except fps=None.
+#
+# fps=None makes manifest_dataset.py fall through to each record's own probed fps
+# (``self._fps_override if not None else the record's fps``) instead of overriding
+# every sample with 10.0. That value is the mRoPE temporal position step's
+# denominator (base_fps/fps = 24/fps, via diffusion_expert_config.enable_fps_modulation),
+# so switching 10.0 -> per-record fps globally rescales the time position encoding (on a
+# mixed-fps corpus, roughly 2.7x on the corpus-mean step). Two consequences:
+#   * A checkpoint trained at fps=10.0 CANNOT be warm-started into this recipe -- the
+#     time encoding would be misaligned. v3 trains from the Cosmos3-Edge base.
+#   * YOUR manifest MUST carry a real per-record ``fps`` field. A wrong/placeholder fps
+#     SILENTLY misaligns the mRoPE timestep (finite loss, no error); a missing one raises
+#     at record load. Only pin fps=10.0 (the _fullft recipe) if your corpus truly is
+#     uniform 10 fps.
+# The released RynnWorld-Latent weights are a v3 (fps=None) checkpoint; this recipe
+# reproduces that training configuration.
+# ---------------------------------------------------------------------------
+rynnworld_latent_edge_manifest_v3_fullft = copy.deepcopy(rynnworld_latent_edge_manifest_fullft)
+rynnworld_latent_edge_manifest_v3_fullft["job"]["name"] = "rynnworld_latent_edge_manifest_v3_fullft"
+rynnworld_latent_edge_manifest_v3_fullft["dataloader_train"]["dataloader"]["datasets"]["rynnworld_latent"]["dataset"]["fps"] = None
+
+cs.store(
+    group="experiment",
+    package="_global_",
+    name="rynnworld_latent_edge_manifest_v3_fullft",
+    node=rynnworld_latent_edge_manifest_v3_fullft,
+)
+
+
+# ---------------------------------------------------------------------------
+# Downstream embodiment post-training: initialize from a TRAINED RynnWorld-Latent
+# film checkpoint (BASE_CHECKPOINT_PATH -> the DCP dir containing model/), not the
+# Cosmos3-Edge base, then fine-tune on your own embodiment's manifest (MANIFEST_DIR).
+#
+# The base recipes set keys_to_skip_loading to also drop action2llm / llm2action /
+# action_modality_embed / action_pos_embed -- correct when warm-starting from the base
+# Edge, where those action params do not exist yet and are reseeded from scratch. A
+# downstream post-train warm-starts from a checkpoint that ALREADY has trained action
+# heads, so the skip list is narrowed to ["net_ema."] only: the film action pathway is
+# PRESERVED and the EMA re-warms from the loaded regular weights. load_training_state
+# stays False (inherited), so the optimizer/scheduler/iteration start fresh while the
+# weights carry over. Data-agnostic: the embodiment is chosen purely by MANIFEST_DIR at
+# launch -- nothing here names a dataset. See configs/posttrain/downstream.toml.
+# ---------------------------------------------------------------------------
+rynnworld_latent_edge_posttrain = copy.deepcopy(rynnworld_latent_edge_manifest_fullft)
+rynnworld_latent_edge_posttrain["job"]["name"] = "rynnworld_latent_edge_posttrain"
+rynnworld_latent_edge_posttrain["checkpoint"]["keys_to_skip_loading"] = ["net_ema."]
+
+cs.store(
+    group="experiment",
+    package="_global_",
+    name="rynnworld_latent_edge_posttrain",
+    node=rynnworld_latent_edge_posttrain,
 )

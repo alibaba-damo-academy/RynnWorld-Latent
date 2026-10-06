@@ -1,0 +1,90 @@
+# ============================================================================
+# RynnWorld-Latent — downstream embodiment post-training (TEMPLATE).
+#
+# Warm-starts from a TRAINED RynnWorld-Latent film checkpoint and fine-tunes it on
+# YOUR OWN embodiment's manifest. This is adaptation, not pretraining, so the LR is
+# ~4x below the from-base recipe and the run is short. Retune max_iter / lr / the
+# scheduler cycle to your corpus size.
+#
+# Required env:
+#   BASE_CHECKPOINT_PATH   a TRAINED film DCP checkpoint dir (the one containing
+#                          model/) — e.g. a stage-1 edge_fullft / v3_fullft output
+#                          under $IMAGINAIRE_OUTPUT_ROOT/.../checkpoints/iter_XXXXXXXX.
+#                          NOT the Cosmos3-Edge base: the post-train experiment loads
+#                          the trained action heads (only net_ema. is skipped).
+#   MANIFEST_DIR           your embodiment's manifest dir, in the documented format
+#                          (README "Data format (manifest)"): chunks_*.jsonl +
+#                          action_stats.json (608-dim) + summary.json. Latent actions
+#                          come from the bundled RynnLAM labeler (rynnlam/README.md).
+#                          Each chunks_*.jsonl record MUST carry a real `fps` if you
+#                          warm-start a v3 (fps=None) checkpoint.
+#   WAN_VAE_PATH           Wan2.2_VAE.pth (gated nvidia/Cosmos3-Edge).
+#   IMAGINAIRE_OUTPUT_ROOT where checkpoints are written.
+#
+# Nothing here names a dataset or embodiment — the data is selected entirely by
+# MANIFEST_DIR at launch. Export the SAME RYNNWORLD_* film switches the warm-start
+# checkpoint was trained with, or the model structure will mismatch:
+#   RYNNWORLD_TEXT_FREE=1 RYNNWORLD_ACTION_TOWER_SPLIT=1 RYNNWORLD_ACTION_FRAME_INJECT=1
+#   RYNNWORLD_ACTION_FILM=1 RYNNWORLD_ACTION_CFG_DROPOUT=0.1
+#   RYNNWORLD_ACTION_CFG_DROPOUT_HAND=0.1 RYNNWORLD_ACTION_CFG_DROPOUT_CAM=0.1
+#
+# Launch (1 node, 8 GPU):
+#   torchrun --nproc_per_node=8 scripts/train.py --sft-toml configs/posttrain/downstream.toml
+# ============================================================================
+
+[job]
+task         = "vfm"
+experiment   = "rynnworld_latent_edge_posttrain"
+project      = "rynnworld_latent"
+group        = "rynnworld_latent_posttrain"
+name         = "rynnworld_latent_downstream_posttrain"
+wandb_mode   = "disabled"
+
+[model]
+precision = "bfloat16"
+
+[model.parallelism]
+data_parallel_shard_degree     = 8
+data_parallel_replicate_degree = 1
+
+[model.activation_checkpointing]
+mode           = "full"
+save_ops_regex = ["fmha"]
+
+[model.tokenizer]
+vae_path = "${oc.env:WAN_VAE_PATH}"
+
+[model.compile]
+enabled = false
+
+[optimizer]
+# ~4x below the from-base recipe (2.0e-04): this is adaptation, not pretraining.
+lr = 5.0e-05
+
+[scheduler]
+# cycle_lengths MUST equal trainer.max_iter: LambdaLinear decays f_max->f_min over the
+# cycle, so a mismatched cycle stops before the LR anneals.
+cycle_lengths = [3000]
+f_min = [0.04]
+warm_up_steps = [200]
+
+[dataloader_train]
+# Batch 4 for full-param + SDPA memory headroom (raise once flash_attn is installed).
+max_samples_per_batch = 4
+
+[trainer]
+max_iter        = 3000
+logging_iter    = 50
+grad_accum_iter = 1
+
+[trainer.callbacks.compile_tokenizer]
+enabled            = false
+warmup_resolutions = ["480"]
+
+[checkpoint]
+# A TRAINED RynnWorld-Latent film checkpoint (DCP dir containing model/), NOT the
+# Cosmos3-Edge base. keys_to_skip_loading=["net_ema."] is set by the experiment node
+# (rynnworld_latent_edge_posttrain), so the trained film action pathway is preserved.
+# load_training_state stays False: weights carry over, optimizer/scheduler/iter reset.
+load_path = "${oc.env:BASE_CHECKPOINT_PATH}"
+save_iter = 250

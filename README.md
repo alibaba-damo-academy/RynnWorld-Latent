@@ -209,7 +209,9 @@ scripts/train.sh ─ torchrun ─ scripts/train.py
 | Experiment | Trains | Use |
 |---|---|---|
 | `rynnworld_latent_edge_manifest` | generation branch + action heads (the `optimizer.keys_to_select` allowlist) | cheaper runs, single-GPU smoke |
-| `rynnworld_latent_edge_manifest_fullft` | **everything** (`keys_to_select=[]`) | the released full-parameter recipe |
+| `rynnworld_latent_edge_manifest_fullft` | **everything** (`keys_to_select=[]`), fps pinned to 10.0 | full-parameter fine-tune from the Cosmos3-Edge base |
+| `rynnworld_latent_edge_manifest_v3_fullft` | same as `_fullft` but `fps=None` (per-record real fps) | **the released weights' recipe** — reproduces the v3 checkpoint |
+| `rynnworld_latent_edge_posttrain` | everything, warm-started from a *trained film* checkpoint (only `net_ema.` skipped) | downstream adaptation to your own embodiment |
 
 ### Full film recipe
 
@@ -249,6 +251,24 @@ Validate the data path without a GPU:
 ```bash
 python scripts/inference/rollout.py --dry-run --manifest-dir "$MANIFEST_DIR" --indices 0,1
 ```
+
+### Downstream embodiment post-training (your own data)
+
+The released model is a general film checkpoint; the highest-value use is **adapting it to your own embodiment**. `rynnworld_latent_edge_posttrain` warm-starts from a *trained* RynnWorld-Latent film checkpoint (not the Cosmos3-Edge base) and fine-tunes on your manifest. Because that checkpoint already has trained action heads, this recipe narrows `keys_to_skip_loading` to `["net_ema."]` only, so the film action pathway is **preserved** instead of reseeded (the from-base recipes drop `action2llm`/`llm2action`/`action_modality_embed` to zero-init them). `load_training_state` stays False — weights carry over; optimizer/scheduler/iteration reset. It is data-agnostic: the embodiment is selected purely by `MANIFEST_DIR`, and nothing in the recipe names a dataset.
+
+```bash
+export MANIFEST_DIR=/path/to/your/embodiment/manifest   # documented format above; RynnLAM-labelled latents
+export BASE_CHECKPOINT_PATH=/path/to/trained_film_dcp    # a DCP dir containing model/ — e.g. a stage-1 edge_fullft / v3_fullft output
+export WAN_VAE_PATH=/path/to/Wan2.2_VAE.pth
+export IMAGINAIRE_OUTPUT_ROOT=./outputs
+# export the SAME RYNNWORLD_* film switches the warm-start checkpoint was trained with (above)
+
+NGPU=8 TOML=configs/posttrain/downstream.toml bash scripts/train.sh
+```
+
+`configs/posttrain/downstream.toml` is a template (lr `5e-5` ≈ 4× below the from-base recipe, 3000 iters — retune to your corpus). `BASE_CHECKPOINT_PATH` must be a **DCP** checkpoint (the cosmos trainer warm-starts from DCP, not safetensors); run stage-1 training to produce one.
+
+> **`fps=None` (v3) caveat.** `rynnworld_latent_edge_manifest_v3_fullft` sets the dataset `fps=None`, so `manifest_dataset.py` uses **each record's own probed fps** instead of overriding everything to 10.0. That fps is the mRoPE temporal-step denominator (`base_fps/fps = 24/fps`), so it globally rescales the time-position encoding: a checkpoint trained at fps=10.0 **cannot** be warm-started into v3, or vice-versa. **Your `chunks_*.jsonl` must carry the real per-record `fps`** — a wrong/placeholder value silently misaligns the mRoPE timestep (finite loss, no error); a missing one raises at load. Pin fps=10.0 (`_fullft`) only if your corpus is genuinely uniform 10 fps.
 
 ---
 
