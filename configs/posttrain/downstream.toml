@@ -8,8 +8,13 @@
 #
 # Required env:
 #   BASE_CHECKPOINT_PATH   a TRAINED film DCP checkpoint dir (the one containing
-#                          model/) — e.g. a stage-1 edge_fullft / v3_fullft output
-#                          under $IMAGINAIRE_OUTPUT_ROOT/.../checkpoints/iter_XXXXXXXX.
+#                          model/). Two ways to get one:
+#                            (a) convert the RELEASED film safetensors with
+#                                scripts/checkpoints/convert_released_to_dcp.py
+#                                (CPU-only, no training) — see README "Downstream
+#                                embodiment post-training"; or
+#                            (b) a stage-1 edge_fullft / v3_fullft output you trained,
+#                                under $IMAGINAIRE_OUTPUT_ROOT/.../checkpoints/iter_XXXXXXXX.
 #                          NOT the Cosmos3-Edge base: the post-train experiment loads
 #                          the trained action heads (only net_ema. is skipped).
 #   MANIFEST_DIR           your embodiment's manifest dir, in the documented format

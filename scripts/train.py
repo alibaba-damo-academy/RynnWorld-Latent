@@ -518,6 +518,38 @@ def _patch_dcp_save_planner_compat() -> None:
 _patch_dcp_save_planner_compat()
 
 
+def _ensure_te_free_optimizer() -> None:
+    """Fall back to a fused AdamW optimizer when ``transformer_engine`` is absent.
+
+    cosmos's default optimizer is ``FusedAdam``, which is provided by NVIDIA's
+    ``transformer_engine`` / ``apex`` and only ships inside their containers. A
+    stock ``pip install -r requirements.txt`` environment has neither, so the
+    default config crashes at optimizer construction with
+    ``ModuleNotFoundError: No module named 'transformer_engine'``. PyTorch's
+    native fused AdamW (``optimizer_type=adamw`` + ``fused=true``) is numerically
+    equivalent for our purposes and needs no extra dependency, so we inject it
+    automatically. This mirrors the existing auto-patches around ``flash_attn``
+    and ``lerobot``. A user who pins ``optimizer.optimizer_type=...`` themselves
+    keeps their choice.
+    """
+    try:
+        import transformer_engine  # noqa: F401
+        return
+    except Exception:  # noqa: BLE001
+        pass
+
+    if any(a.startswith("optimizer.optimizer_type=") for a in sys.argv[1:]):
+        return  # user pinned an optimizer explicitly; respect it
+
+    sys.argv += ["optimizer.optimizer_type=adamw", "optimizer.fused=true"]
+    print(
+        "[train.py] transformer_engine unavailable -> optimizer fallback: "
+        "optimizer.optimizer_type=adamw optimizer.fused=true"
+    )
+
+
+_ensure_te_free_optimizer()
+
 
 # Execute the cosmos train script as __main__; sys.argv (--sft-toml, overrides)
 # is passed through unchanged.

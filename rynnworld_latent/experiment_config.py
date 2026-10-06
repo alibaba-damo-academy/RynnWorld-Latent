@@ -28,7 +28,9 @@ Usage (1 node, 8 GPU)::
     torchrun --nproc_per_node=8 scripts/train.py \
         --sft-toml configs/train/edge_fullft.toml
 
-Downstream post-train (warm-start from a trained film checkpoint, your own embodiment)::
+Downstream post-train (warm-start from a trained film checkpoint, your own embodiment).
+The released film weights are safetensors; ``scripts/checkpoints/convert_released_to_dcp.py``
+re-serializes them to the DCP dir ``BASE_CHECKPOINT_PATH`` expects (CPU-only, no training)::
 
     MANIFEST_DIR=/path/to/your/embodiment/manifest \
     BASE_CHECKPOINT_PATH=<trained film DCP dir, containing model/> \
@@ -212,7 +214,10 @@ _edge_base = LazyDict(
                         ratio=1,
                         dataset=L(get_rynnworld_manifest_sft_dataset)(
                             manifest_dir="${oc.env:MANIFEST_DIR}",
-                            staged_root="${oc.env:STAGED_ROOT}",
+                            # STAGED_ROOT is optional: empty means "read the original
+                            # source videos in place" (no 480p staging copy). Default it
+                            # so a bare `train.sh` / direct invocation doesn't need it set.
+                            staged_root="${oc.env:STAGED_ROOT,''}",
                             fps=10.0,
                             mode="forward_dynamics",
                             action_normalization="quantile",

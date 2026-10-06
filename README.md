@@ -256,17 +256,29 @@ python scripts/inference/rollout.py --dry-run --manifest-dir "$MANIFEST_DIR" --i
 
 The released model is a general film checkpoint; the highest-value use is **adapting it to your own embodiment**. `rynnworld_latent_edge_posttrain` warm-starts from a *trained* RynnWorld-Latent film checkpoint (not the Cosmos3-Edge base) and fine-tunes on your manifest. Because that checkpoint already has trained action heads, this recipe narrows `keys_to_skip_loading` to `["net_ema."]` only, so the film action pathway is **preserved** instead of reseeded (the from-base recipes drop `action2llm`/`llm2action`/`action_modality_embed` to zero-init them). `load_training_state` stays False — weights carry over; optimizer/scheduler/iteration reset. It is data-agnostic: the embodiment is selected purely by `MANIFEST_DIR`, and nothing in the recipe names a dataset.
 
+Turnkey flow — download the released weights, re-serialize to DCP once, then post-train:
+
 ```bash
+# 1. Download the released film checkpoint (safetensors) — same weights the rollout section uses.
+python -c "from huggingface_hub import snapshot_download; snapshot_download('Alibaba-DAMO-Academy/RynnWorld-Latent', local_dir='./weights/RynnWorld-Latent')"
+
+# 2. One-time CPU-only re-serialization to DCP (the trainer warm-starts from DCP, not safetensors).
+#    No GPU, no model instantiation, no VAE. Add --skip-ema to drop net_ema.* and halve the output.
+python scripts/checkpoints/convert_released_to_dcp.py \
+    --safetensors ./weights/RynnWorld-Latent \
+    --out         ./weights/RynnWorld-Latent-dcp
+
+# 3. Post-train on your own embodiment manifest (or data/manifest for a pipeline smoke).
 export MANIFEST_DIR=/path/to/your/embodiment/manifest   # documented format above; RynnLAM-labelled latents
-export BASE_CHECKPOINT_PATH=/path/to/trained_film_dcp    # a DCP dir containing model/ — e.g. a stage-1 edge_fullft / v3_fullft output
+export BASE_CHECKPOINT_PATH=./weights/RynnWorld-Latent-dcp   # the DCP from step 2
 export WAN_VAE_PATH=/path/to/Wan2.2_VAE.pth
 export IMAGINAIRE_OUTPUT_ROOT=./outputs
-# export the SAME RYNNWORLD_* film switches the warm-start checkpoint was trained with (above)
+# export the SAME RYNNWORLD_* film switches the released checkpoint was trained with (above)
 
 NGPU=8 TOML=configs/posttrain/downstream.toml bash scripts/train.sh
 ```
 
-`configs/posttrain/downstream.toml` is a template (lr `5e-5` ≈ 4× below the from-base recipe, 3000 iters — retune to your corpus). `BASE_CHECKPOINT_PATH` must be a **DCP** checkpoint (the cosmos trainer warm-starts from DCP, not safetensors); run stage-1 training to produce one.
+`configs/posttrain/downstream.toml` is a template (lr `5e-5` ≈ 4× below the from-base recipe, 3000 iters — retune to your corpus). `BASE_CHECKPOINT_PATH` must be a **DCP** checkpoint (the cosmos trainer warm-starts from DCP, not safetensors): step 2's `convert_released_to_dcp.py` produces one from the released weights without any training, or point it at a stage-1 `edge_fullft` / `v3_fullft` output you trained yourself. On a stock `requirements.txt` environment (no NVIDIA `transformer_engine`/`apex`), `scripts/train.py` auto-injects a fused-AdamW optimizer (`optimizer.optimizer_type=adamw optimizer.fused=true`), so no manual override is needed; pin `optimizer.optimizer_type=...` yourself to keep a different optimizer.
 
 > **`fps=None` (v3) caveat.** `rynnworld_latent_edge_manifest_v3_fullft` sets the dataset `fps=None`, so `manifest_dataset.py` uses **each record's own probed fps** instead of overriding everything to 10.0. That fps is the mRoPE temporal-step denominator (`base_fps/fps = 24/fps`), so it globally rescales the time-position encoding: a checkpoint trained at fps=10.0 **cannot** be warm-started into v3, or vice-versa. **Your `chunks_*.jsonl` must carry the real per-record `fps`** — a wrong/placeholder value silently misaligns the mRoPE timestep (finite loss, no error); a missing one raises at load. Pin fps=10.0 (`_fullft`) only if your corpus is genuinely uniform 10 fps.
 
@@ -357,7 +369,8 @@ RynnWorld-Latent/
     train.py/.sh      #   training entrypoint + single-node torchrun launcher
     train_8gpu.sh     #   single-node submit; bundled-data quickstart by default
     inference/        #   rollout.py (roll out vs GT), inpaint_rollout.py (custom first frame)
-    checkpoints/      #   convert_edge_to_dcp.py (HF safetensors -> DCP)
+    checkpoints/      #   convert_edge_to_dcp.py (base Edge HF -> DCP),
+                      #   convert_released_to_dcp.py (released film safetensors -> DCP)
     test_world_model.sh   # staged data / lam / train / infer checks on data/
     test_lam_inference.py # re-encode data/videos with RynnLAM, diff vs data/latents
   examples/           # cross_action_transfer.py (+ _video_utils.py) demo
@@ -381,13 +394,15 @@ RynnWorld-Latent/
 | `rynnworld_latent/rynnlam_bridge.py` | lazy bridge to the bundled RynnLAM: `FrameReader` for special sources, `start_frame` from npz meta |
 | `rynnworld_latent/inference.py` | shared model loading (`load_world_model`), rollout batch construction, local-tokenizer patch, PSNR / temporal-diff metrics |
 | `scripts/train.py` / `train.sh` / `train_8gpu.sh` | training entrypoint (registration + patches) / single-node torchrun launcher / submit wrapper |
-| `scripts/checkpoints/convert_edge_to_dcp.py` | HF safetensors → DCP |
+| `scripts/checkpoints/convert_edge_to_dcp.py` | base Cosmos3-Edge HF safetensors → DCP (builds the model; for stage-1 from-base training) |
+| `scripts/checkpoints/convert_released_to_dcp.py` | released film safetensors (`net.*`) → DCP, CPU-only & model-free (warm-start for downstream post-training) |
 | `scripts/setup/download_weights.sh` | gated Cosmos3-Edge download + DCP conversion |
 | `scripts/inference/rollout.py` | first-frame + latent-action rollout (`gen_*.mp4` / `gt_*.mp4` + PSNR) |
 | `scripts/inference/inpaint_rollout.py` | rollout with a custom (e.g. inpainted) first frame, reusing the source latent actions |
 | `examples/cross_action_transfer.py` | cross-action transfer demo (A's frame + B's action) with side-by-side panels |
 | `scripts/test_world_model.sh` / `scripts/test_lam_inference.py` | staged end-to-end checks on the bundled data (world model / RynnLAM) |
 | `configs/train/edge_fullft.toml` | **the released full-parameter recipe** |
+| `configs/posttrain/downstream.toml` | data-agnostic downstream post-training template (warm-start from a released/stage-1 DCP) |
 | `configs/examples/edge_manifest_local.toml` | single-GPU smoke recipe |
 
 ---
