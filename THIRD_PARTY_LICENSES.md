@@ -76,9 +76,12 @@ similarity (57 files: 44 under `third_party/cosmos-framework/`, and 13 under
 `# Provenance reference (composition scan ...)` comment block at the top. The
 block records the scanner's nearest-repo match, states explicitly that this is
 *not* a verified derivation, and gives the file's actual in-header license. It
-prepends a comment only — no code is changed. This is the sole local modification
-to the otherwise upstream-faithful vendored subtree (see `NOTICE`,
-"Vendored subtree vs. upstream").
+prepends a comment only — no code is changed. These headers are one of a small
+number of local modifications to the otherwise upstream-faithful vendored
+subtree; the complete, authoritative list — including the one functional
+(non-comment) edit, a `.removeprefix("net.")` fix in
+`model/generator/utils/safetensors_loader.py` so the released safetensors weights
+load — is in `NOTICE`, "Vendored subtree vs. upstream".
 
 ## Weights (downloaded, not bundled)
 
@@ -94,9 +97,13 @@ this repository deliberately ships **code only**.
 
 ## Data
 
-Training and evaluation data is not redistributed, with one exception: three
-in-house `tianji_wuji_data` chunks ship under `data/` so a fresh clone trains
-out of the box (provenance and frame windows in the README). The
+Training and evaluation data is not redistributed, with one exception: a small
+set of in-house samples ships under `data/` so a fresh clone trains, post-trains
+and evaluates out of the box — three `tianji_wuji_data` chunks under
+`data/{videos,latents,manifest}` for the world-model quickstart, plus one real
+record each for the two downstream post-train quickstarts (`data/astribot_s1/`
+for Astribot-S1 and `data/marvin_wuji/` for Marvin-WUJI). Provenance and frame
+windows are in the README. The
 corpora this project was developed against (RynnVLA-Base and its RynnLAM
 latents, RoVid-X, EgoVerse, RoboMIND, AgiBot, DROID, EPIC-KITCHENS, EgoDex, and
 the DreamDojo / GR00T-Teleop-GR1 evaluation sets) each carry their own access

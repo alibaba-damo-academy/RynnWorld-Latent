@@ -80,6 +80,17 @@ additions are limited to:
    (https://example.test/v1) in inference/prompt_upsampling_test.py, replacing a
    real-looking external API URL in a fully mocked unit test that never opens a
    socket.
+4. ONE functional (non-comment) edit, in
+   third_party/cosmos-framework/cosmos_framework/model/generator/utils/safetensors_loader.py
+   (`load_vfm_model`): after stripping a leading `model.net.`, it now also strips
+   a bare leading `net.` (a single `.removeprefix("net.")` plus an explanatory
+   comment). The released RynnWorld-Latent weights ship as raw OmniMoTModel
+   safetensors (`net.*` regular + `net_ema.*` EMA); without this strip every
+   `net.*` key fell through as an "extra checkpoint key" and the released weights
+   could not be loaded. `net_ema.*` does not start with `net.` (4th char is `_`),
+   so it survives both strips and is ignored — the regular weights load, matching
+   `--no-ema`. The rest of the file is upstream. This is the only functional
+   change to the vendored subtree; items 1-3 above are comment-only.
 
 To diff a flagged file against upstream, ignore the leading provenance comment
 block. The full scan list and license reconciliation is in THIRD_PARTY_LICENSES.md

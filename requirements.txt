@@ -76,8 +76,8 @@ boto3               # IMPORT-TIME requirement of the vendored cosmos-framework
                     # SKU is `local` (object store disabled), and
                     # enable_gcs_patch_in_boto3=False, so no S3/GCS API is ever
                     # called. It cannot be dropped without patching the vendored
-                    # subtree, which NOTICE requires be kept byte-identical to
-                    # upstream. Installed, imported, never exercised.
+                    # subtree, which NOTICE keeps as close to upstream as possible
+                    # ("Vendored subtree vs. upstream"). Installed, imported, never exercised.
 accelerate          # cosmos model/generator/hf_model
 datasets            # cosmos data pipeline
 pandas              # cosmos callbacks + easy_io pandas handler

@@ -1,9 +1,16 @@
 # ============================================================================
 # RynnWorld-Latent — Cosmos3-Edge FULL-PARAMETER fine-tune (the released recipe).
 #
-# Uses the `rynnworld_latent_edge_manifest_fullft` experiment, whose
+# Uses the `rynnworld_latent_edge_manifest_v3_fullft` experiment — identical to
+# `_fullft` except dataset `fps=None` (each record's own probed fps), which is
+# what the released RynnWorld-Latent weights were trained with. Its
 # optimizer.keys_to_select=[] makes the ENTIRE 3.37B net trainable (understanding
 # backbone + generation branch + action heads) rather than just the gen branch.
+#
+# fps=None requires every chunks_*.jsonl record to carry a real `fps` (the bundled
+# ones do). Pin fps=10.0 instead — experiment `rynnworld_latent_edge_manifest_fullft`
+# — ONLY if your corpus is genuinely uniform 10 fps; a fps=10.0 checkpoint cannot
+# be warm-started into v3 or vice-versa (see README, "fps=None (v3) caveat").
 #
 # Batch is 4 (not 8): full-param training triples optimizer state (AdamW m/v/master
 # for 3.37B vs 1.07B) and, without flash_attn (SDPA fallback), batch 8 would OOM.
@@ -12,7 +19,7 @@
 
 [job]
 task         = "vfm"
-experiment   = "rynnworld_latent_edge_manifest_fullft"
+experiment   = "rynnworld_latent_edge_manifest_v3_fullft"
 project      = "rynnworld_latent"
 group        = "rynnworld_latent_sft"
 name         = "rynnworld_latent_manifest_fullft"

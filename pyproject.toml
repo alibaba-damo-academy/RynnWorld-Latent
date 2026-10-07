@@ -61,8 +61,8 @@ dependencies = [
     # (utils.config -> object_store -> easy_io transient_retry import it
     # unconditionally under COSMOS_TRAINING). RynnWorld-Latent's own code never
     # calls any S3/GCS API: checkpoints are local-only and
-    # enable_gcs_patch_in_boto3=False. Kept because NOTICE requires the vendored
-    # subtree stay byte-identical to upstream. See requirements.txt.
+    # enable_gcs_patch_in_boto3=False. Kept so the vendored subtree stays as close
+    # to upstream as possible (NOTICE, "Vendored subtree vs. upstream"). See requirements.txt.
     "boto3",
     "accelerate",
     "datasets",

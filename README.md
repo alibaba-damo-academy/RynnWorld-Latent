@@ -289,6 +289,7 @@ Each downstream embodiment ships with **one real teleop sample** under `data/<em
 | Embodiment | Launcher | Bundled sample |
 |---|---|---|
 | **Astribot-S1** | `scripts/posttrain/astribot_s1.sh` | `data/astribot_s1/` — 1 record, 81 frames / 20 latents, 30 fps |
+| **Marvin-WUJI** | `scripts/posttrain/marvin_wuji.sh` | `data/marvin_wuji/` — 1 record, 81 frames / 20 latents, 30 fps |
 
 ```bash
 export BASE_CHECKPOINT_PATH=./weights/RynnWorld-Latent-dcp   # convert_released_to_dcp.py output (step 2)
@@ -296,6 +297,7 @@ export WAN_VAE_PATH=/path/to/Wan2.2_VAE.pth
 
 NGPU=8 bash scripts/posttrain/astribot_s1.sh              # full 3000-iter run
 NGPU=1 MAX_ITER=3 bash scripts/posttrain/astribot_s1.sh   # single-GPU smoke
+NGPU=1 MAX_ITER=3 bash scripts/posttrain/marvin_wuji.sh   # same, Marvin-WUJI
 ```
 
 `MAX_ITER` caps both `trainer.max_iter` and the scheduler `cycle_lengths` (they must match). To post-train on your **own** corpus instead of the bundled sample, override the manifest: `MANIFEST_DIR=/path/to/yours bash scripts/posttrain/astribot_s1.sh`.
@@ -357,7 +359,7 @@ Two runnable demos showcase what action-conditioning buys. Both load a checkpoin
 export PYTHONPATH="$PWD:$PWD/third_party/cosmos-framework"
 python examples/cross_action_transfer.py \
   --manifest-dir "$MANIFEST_DIR" --checkpoint /path/to/iter_000008000 \
-  --pairs 0:1,2:3 --out outputs/xfer        # add --staged-root if you staged 480p copies
+  --pairs 0:1,1:2 --out outputs/xfer        # indices into the 3 bundled records; add --staged-root if you staged 480p copies
 ```
 
 **Inpainted first frame** (`scripts/inference/inpaint_rollout.py`) — the data-synthesis mode: replace frame 0 with your own edited image (e.g. an inpainted or embodiment-swapped scene) but keep the source chunk's 20 latent actions, so the generated motion follows the original while the appearance follows your edit. Writes the generation and its GT counterpart.
@@ -389,7 +391,7 @@ RynnWorld-Latent/
     train.py/.sh      #   training entrypoint + single-node torchrun launcher
     train_8gpu.sh     #   single-node submit; bundled-data quickstart by default
     inference/        #   rollout.py (roll out vs GT), inpaint_rollout.py (custom first frame)
-    posttrain/        #   astribot_s1.sh (per-embodiment downstream post-train launcher)
+    posttrain/        #   astribot_s1.sh, marvin_wuji.sh (per-embodiment post-train launchers)
     checkpoints/      #   convert_edge_to_dcp.py (base Edge HF -> DCP),
                       #   convert_released_to_dcp.py (released film safetensors -> DCP)
     test_world_model.sh   # staged data / lam / train / infer checks on data/
@@ -397,7 +399,7 @@ RynnWorld-Latent/
   examples/           # cross_action_transfer.py (+ _video_utils.py) demo
   configs/            # recipe TOMLs (train/ full-FT, posttrain/ downstream, examples/ smoke)
   data/               # bundled samples: manifest/ (3 generic chunks) + <embodiment>/ (1 real
-                      #   teleop sample each, e.g. astribot_s1/) for the post-train quickstarts
+                      #   teleop sample each: astribot_s1/, marvin_wuji/) for the post-train quickstarts
   rynnlam/            # bundled latent-action model (own LICENSE/NOTICE/pyproject)
   third_party/
     cosmos-framework/ # NVIDIA training stack, CODE ONLY (no weights)
@@ -416,7 +418,7 @@ RynnWorld-Latent/
 | `rynnworld_latent/rynnlam_bridge.py` | lazy bridge to the bundled RynnLAM: `FrameReader` for special sources, `start_frame` from npz meta |
 | `rynnworld_latent/inference.py` | shared model loading (`load_world_model`), rollout batch construction, local-tokenizer patch, PSNR / temporal-diff metrics |
 | `scripts/train.py` / `train.sh` / `train_8gpu.sh` | training entrypoint (registration + patches) / single-node torchrun launcher / submit wrapper |
-| `scripts/posttrain/astribot_s1.sh` | per-embodiment downstream post-train launcher (bundled real sample; override `MANIFEST_DIR` for your own) |
+| `scripts/posttrain/{astribot_s1,marvin_wuji}.sh` | per-embodiment downstream post-train launchers (bundled real sample; override `MANIFEST_DIR` for your own) |
 | `scripts/checkpoints/convert_edge_to_dcp.py` | base Cosmos3-Edge HF safetensors → DCP (builds the model; for stage-1 from-base training) |
 | `scripts/checkpoints/convert_released_to_dcp.py` | released film safetensors (`net.*`) → DCP, CPU-only & model-free (warm-start for downstream post-training) |
 | `scripts/setup/download_weights.sh` | gated Cosmos3-Edge download + DCP conversion |
@@ -424,7 +426,7 @@ RynnWorld-Latent/
 | `scripts/inference/inpaint_rollout.py` | rollout with a custom (e.g. inpainted) first frame, reusing the source latent actions |
 | `examples/cross_action_transfer.py` | cross-action transfer demo (A's frame + B's action) with side-by-side panels |
 | `scripts/test_world_model.sh` / `scripts/test_lam_inference.py` | staged end-to-end checks on the bundled data (world model / RynnLAM) |
-| `configs/train/edge_fullft.toml` | **the released full-parameter recipe** |
+| `configs/train/edge_fullft.toml` | **the released full-parameter recipe** (selects the v3 experiment, `fps=None`) |
 | `configs/posttrain/downstream.toml` | data-agnostic downstream post-training template (warm-start from a released/stage-1 DCP) |
 | `configs/examples/edge_manifest_local.toml` | single-GPU smoke recipe |
 
