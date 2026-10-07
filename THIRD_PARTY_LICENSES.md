@@ -104,7 +104,7 @@ and evaluates out of the box — three `tianji_wuji_data` chunks under
 record each for the two downstream post-train quickstarts (`data/astribot_s1/`
 for Astribot-S1 and `data/marvin_wuji/` for Marvin-WUJI). Provenance and frame
 windows are in the README. The
-corpora this project was developed against (RynnVLA-Base and its RynnLAM
+corpora this project was developed against (RynnVLA-Latent and its RynnLAM
 latents, RoVid-X, EgoVerse, RoboMIND, AgiBot, DROID, EPIC-KITCHENS, EgoDex, and
 the DreamDojo / GR00T-Teleop-GR1 evaluation sets) each carry their own access
 terms and must be obtained from their publishers. See the README for what each

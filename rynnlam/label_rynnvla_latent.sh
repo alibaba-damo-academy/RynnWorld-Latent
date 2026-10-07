@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Label ALL RynnVLA-Base datasets with stride-4 latent action.
+# Label ALL RynnVLA-Latent datasets with stride-4 latent action.
 #
 # Latent action = featsrc k_token (K=8 x 64 = 512d) from the b512 checkpoint.
 # Stride-4: pair (t, t+4), start frames advance by 4 -> (0,4),(4,8),(8,12)...
@@ -19,15 +19,15 @@
 # silently overwritten. SIGKILL never leaves a half-written label.
 #
 # Usage (per process, e.g. card i of 200):
-#   SLICE=200 ID=$i CKPT=/path/to/b512_slim.pt bash label_rynnvla_base.sh
+#   SLICE=200 ID=$i CKPT=/path/to/b512_slim.pt bash label_rynnvla_latent.sh
 # =============================================================================
 set -uo pipefail
 
 SLICE="${SLICE:-250}"                 # total parallel processes (= cards)
 ID="${ID:-0}"                         # this process index, 0..SLICE-1
 CKPT="${CKPT:?set CKPT to the validated + slimmed b512 checkpoint (.pt with config+model_state_dict)}"
-DATA="${DATA:-/path/to/RynnVLA-Base}"
-OUT="${OUT:-/path/to/RynnVLA-Base-latent-ktoken608}"
+DATA="${DATA:-/path/to/RynnVLA-Latent}"
+OUT="${OUT:-/path/to/RynnVLA-Latent-ktoken608}"
 RYNNLAM="${RYNNLAM:-/path/to/RynnWorld-Latent/rynnlam}"
 PYTHON="${PYTHON:-python}"                 # same convention as scripts/evaluate.sh
 SCRATCH="${SCRATCH:-/tmp/rynnlam-label-scratch-$ID}"   # per-process local scratch

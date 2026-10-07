@@ -64,4 +64,4 @@ fi
 echo "[label-job] $(date '+%F %T') index=$resolved/$SLICE from \$$source_var  python=$PYTHON  ckpt=$CKPT"
 
 exec env SLICE="$SLICE" ID="$resolved" CKPT="$CKPT" PYTHON="$PYTHON" \
-    bash "$RYNNLAM/label_rynnvla_base.sh"
+    bash "$RYNNLAM/label_rynnvla_latent.sh"

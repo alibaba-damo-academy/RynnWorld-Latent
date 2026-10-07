@@ -2,7 +2,7 @@
 
 RynnLAM labels videos with a single 608-dim ``latent_action`` key
 (``[k_tokens 512 | z 64 | camera 32]``, gap=4 / pair_stride=4), and parts of the
-RynnVLA-Base corpus are not plain video files: ``rovidx_tar://`` URLs (byte-offset
+RynnVLA-Latent corpus are not plain video files: ``rovidx_tar://`` URLs (byte-offset
 reads into tar shards), zarr directories (EgoVerse) and hdf5 files (RoboMIND).
 ``rynnlam.video.FrameReader`` already implements every one of those backends and
 is the exact decoder the labels were produced with, so video loading reuses it
