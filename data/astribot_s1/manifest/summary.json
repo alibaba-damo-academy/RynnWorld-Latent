@@ -1,0 +1,10 @@
+{
+ "chunks": 1,
+ "datasets": [
+  "astribot_s1"
+ ],
+ "protocol": "v2 ktoken_zcam 608",
+ "action_dim": 608,
+ "stats_schema": "v2",
+ "note": "one real astribot_s1 teleop sample bundled so the downstream post-train recipe runs out of the box; replace MANIFEST_DIR with your own embodiment's manifest for real adaptation"
+}

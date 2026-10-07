@@ -70,3 +70,14 @@ checkpoints/
 !/data/latents/
 !/data/latents/*/latent.npz
 !/data/manifest/
+
+# Per-embodiment downstream post-train quickstarts: data/<embodiment>/{videos,
+# latents,manifest} each ship one real sample so the per-embodiment launcher runs
+# out of the box (e.g. data/astribot_s1/). Generic so new embodiments need no edit.
+!/data/*/
+!/data/*/videos/
+!/data/*/videos/*.mp4
+!/data/*/latents/
+!/data/*/latents/*/
+!/data/*/latents/*/latent.npz
+!/data/*/manifest/

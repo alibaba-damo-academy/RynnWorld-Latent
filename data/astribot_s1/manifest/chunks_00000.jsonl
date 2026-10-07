@@ -1,0 +1,1 @@
+{"ds": "astribot_s1", "ep": "episode_000001", "view": "head", "src": "videos/astribot_s1_episode_000001.mp4", "vid": "astribot_s1/astribot_s1_episode_000001/head.mp4", "lat": "latents/astribot_s1_episode_000001/latent.npz", "start": 0, "nf": 81, "na": 20, "cap": "A robot performing a manipulation task.", "fps": 30.0, "as": "v2", "lat_start": 0, "lat_stride": 1}

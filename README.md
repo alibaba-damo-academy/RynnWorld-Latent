@@ -282,6 +282,26 @@ NGPU=8 TOML=configs/posttrain/downstream.toml bash scripts/train.sh
 
 > **`fps=None` (v3) caveat.** `rynnworld_latent_edge_manifest_v3_fullft` sets the dataset `fps=None`, so `manifest_dataset.py` uses **each record's own probed fps** instead of overriding everything to 10.0. That fps is the mRoPE temporal-step denominator (`base_fps/fps = 24/fps`), so it globally rescales the time-position encoding: a checkpoint trained at fps=10.0 **cannot** be warm-started into v3, or vice-versa. **Your `chunks_*.jsonl` must carry the real per-record `fps`** — a wrong/placeholder value silently misaligns the mRoPE timestep (finite loss, no error); a missing one raises at load. Pin fps=10.0 (`_fullft`) only if your corpus is genuinely uniform 10 fps.
 
+### Bundled per-embodiment quickstart (real sample, runs out of the box)
+
+Each downstream embodiment ships with **one real teleop sample** under `data/<embodiment>/` plus a launcher, so you can exercise the full per-embodiment post-train path immediately. A launcher warm-starts from the released film DCP (step 2 above), points `MANIFEST_DIR` at that embodiment's bundled sample, and exports the film switches — the per-embodiment launchers differ only in which sample they load.
+
+| Embodiment | Launcher | Bundled sample |
+|---|---|---|
+| **Astribot-S1** | `scripts/posttrain/astribot_s1.sh` | `data/astribot_s1/` — 1 record, 81 frames / 20 latents, 30 fps |
+
+```bash
+export BASE_CHECKPOINT_PATH=./weights/RynnWorld-Latent-dcp   # convert_released_to_dcp.py output (step 2)
+export WAN_VAE_PATH=/path/to/Wan2.2_VAE.pth
+
+NGPU=8 bash scripts/posttrain/astribot_s1.sh              # full 3000-iter run
+NGPU=1 MAX_ITER=3 bash scripts/posttrain/astribot_s1.sh   # single-GPU smoke
+```
+
+`MAX_ITER` caps both `trainer.max_iter` and the scheduler `cycle_lengths` (they must match). To post-train on your **own** corpus instead of the bundled sample, override the manifest: `MANIFEST_DIR=/path/to/yours bash scripts/posttrain/astribot_s1.sh`.
+
+> **What ships / what doesn't.** The bundled video is an **unmodified** copy (so the frames the VAE sees match the frames the actions were labelled from); internal absolute paths, corpus sample counts, and manifest fingerprints are stripped from the shipped `chunks_*.jsonl` / `action_stats.json` / latent `meta`, and `src`/`lat` are relative to `data/<embodiment>/` exactly like the generic `data/manifest` bundle. The sample's 608-dim latents are **pre-generated** and included; this release bundles RynnLAM *video* labeling (`rynnlam/`) for the generic latent route, but not the embodiment-specific physical-action→MLP labeling pipeline that produced these particular latents — treat the sample as a runnable reference and label your own data with RynnLAM.
+
 ---
 
 ## Inference & evaluation
@@ -369,13 +389,15 @@ RynnWorld-Latent/
     train.py/.sh      #   training entrypoint + single-node torchrun launcher
     train_8gpu.sh     #   single-node submit; bundled-data quickstart by default
     inference/        #   rollout.py (roll out vs GT), inpaint_rollout.py (custom first frame)
+    posttrain/        #   astribot_s1.sh (per-embodiment downstream post-train launcher)
     checkpoints/      #   convert_edge_to_dcp.py (base Edge HF -> DCP),
                       #   convert_released_to_dcp.py (released film safetensors -> DCP)
     test_world_model.sh   # staged data / lam / train / infer checks on data/
     test_lam_inference.py # re-encode data/videos with RynnLAM, diff vs data/latents
   examples/           # cross_action_transfer.py (+ _video_utils.py) demo
-  configs/            # recipe TOMLs (train/ full-FT, examples/ single-GPU smoke)
-  data/               # 3 bundled sample chunks (videos + latents + manifest)
+  configs/            # recipe TOMLs (train/ full-FT, posttrain/ downstream, examples/ smoke)
+  data/               # bundled samples: manifest/ (3 generic chunks) + <embodiment>/ (1 real
+                      #   teleop sample each, e.g. astribot_s1/) for the post-train quickstarts
   rynnlam/            # bundled latent-action model (own LICENSE/NOTICE/pyproject)
   third_party/
     cosmos-framework/ # NVIDIA training stack, CODE ONLY (no weights)
@@ -394,6 +416,7 @@ RynnWorld-Latent/
 | `rynnworld_latent/rynnlam_bridge.py` | lazy bridge to the bundled RynnLAM: `FrameReader` for special sources, `start_frame` from npz meta |
 | `rynnworld_latent/inference.py` | shared model loading (`load_world_model`), rollout batch construction, local-tokenizer patch, PSNR / temporal-diff metrics |
 | `scripts/train.py` / `train.sh` / `train_8gpu.sh` | training entrypoint (registration + patches) / single-node torchrun launcher / submit wrapper |
+| `scripts/posttrain/astribot_s1.sh` | per-embodiment downstream post-train launcher (bundled real sample; override `MANIFEST_DIR` for your own) |
 | `scripts/checkpoints/convert_edge_to_dcp.py` | base Cosmos3-Edge HF safetensors → DCP (builds the model; for stage-1 from-base training) |
 | `scripts/checkpoints/convert_released_to_dcp.py` | released film safetensors (`net.*`) → DCP, CPU-only & model-free (warm-start for downstream post-training) |
 | `scripts/setup/download_weights.sh` | gated Cosmos3-Edge download + DCP conversion |
