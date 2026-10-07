@@ -41,6 +41,45 @@ sys.path.insert(0, str(_COSMOS_ROOT))
 sys.path.insert(0, str(_REPO_ROOT))
 
 
+def _patch_save_planner_compat() -> None:
+    """cosmos ``CustomSavePlanner`` forwards ``enable_plan_caching`` to torch's
+    ``DefaultSavePlanner``, which torch<2.7 does not accept -> ``TypeError``. This
+    mirrors ``scripts/train.py``'s shim so the converter runs on the same torch
+    range training does. No-op where torch already supports plan caching (>=2.7).
+    """
+    import inspect
+
+    import torch.distributed.checkpoint.default_planner as _dp
+    from cosmos_framework.checkpoint import dcp as _cdcp
+
+    if "enable_plan_caching" in inspect.signature(_dp.DefaultSavePlanner.__init__).parameters:
+        return
+
+    _Base = _dp.DefaultSavePlanner
+
+    def _compat_init(
+        self,
+        flatten_state_dict: bool = True,
+        flatten_sharded_tensors: bool = True,
+        dedup_save_to_lowest_rank: bool = False,
+        save_reg_to_ema: bool = False,
+        enable_plan_caching: bool = False,  # accepted but ignored on torch<2.7
+        cache_plans_key=None,
+    ) -> None:
+        _Base.__init__(
+            self,
+            flatten_state_dict=flatten_state_dict,
+            flatten_sharded_tensors=flatten_sharded_tensors,
+            dedup_save_to_lowest_rank=dedup_save_to_lowest_rank,
+        )
+        if cache_plans_key is not None:
+            self._cached_plans_key = cache_plans_key
+        self.save_reg_to_ema = save_reg_to_ema
+
+    _cdcp.CustomSavePlanner.__init__ = _compat_init
+    print("[convert-released] patched CustomSavePlanner.__init__ (dropped enable_plan_caching for torch<2.7)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--safetensors", required=True, help="Released RynnWorld-Latent safetensors dir (net.* layout)")
@@ -66,6 +105,8 @@ def main() -> None:
     from torch.distributed.checkpoint.filesystem import FileSystemWriter
 
     from cosmos_framework.checkpoint.dcp import CustomSavePlanner
+
+    _patch_save_planner_compat()  # torch<2.7 CustomSavePlanner shim (no-op on >=2.7)
 
     state_dict: dict[str, torch.Tensor] = {}
     for shard in shards:

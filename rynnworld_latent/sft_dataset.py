@@ -85,7 +85,15 @@ class ActionIterableShuffleDataset(IterableDataset):
             g = torch.Generator()
             g.manual_seed(base + epoch)
             order = torch.randperm(total, generator=g).tolist()
-            for idx in order[global_shard::total_shards]:
+            shard = order[global_shard::total_shards]
+            if not shard:
+                # Dataset smaller than the shard count (total < world_size*num_workers),
+                # e.g. a 1-sample quickstart bundle: this worker's strided slice is empty,
+                # so the `while True` loop would spin forever yielding nothing and stall
+                # the DataLoader the moment it waits on this worker. Fall back to the full
+                # order so every shard produces data. No-op once total >= total_shards.
+                shard = order
+            for idx in shard:
                 yield self._dataset[idx]
             epoch += 1
 
