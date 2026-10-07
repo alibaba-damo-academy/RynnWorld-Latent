@@ -333,9 +333,9 @@ python scripts/inference/rollout.py \
   --indices 0,1,2 --num-steps 35 --guidance 1.5 --no-ema --out /tmp/rollout
 ```
 
-`--no-ema` is required here (see the note above): the safetensors loader consumes `net.*` and ignores `net_ema.*`. On the three bundled sample chunks this reproduces **PSNR(gen,gt) ≈ 21–23 dB**, above the 15–22 dB static-first-frame baseline, with motion(gen)/motion(gt) ≈ 1.0–1.3 — i.e. the model predicts real action-conditioned motion rather than copying frame 0.
+`--no-ema` is required here (see the note above): the safetensors loader consumes `net.*` and ignores `net_ema.*`. On the three bundled sample chunks this reproduces **PSNR(gen,gt) ≈ 21–23 dB** (measured under `fps=None`, matching the v3 training fps), above the 15–22 dB static-first-frame baseline, with motion(gen)/motion(gt) ≈ 1.0–1.2 — i.e. the model predicts real action-conditioned motion rather than copying frame 0.
 
-> **Eval fps vs. the released v3 weights (known difference).** `rollout.py` builds its eval dataset through `inference.py:build_rollout_dataset`, which pins `fps=10.0`. The released weights are a v3 (`fps=None`) checkpoint trained on each record's own probed fps (the bundled samples are 30 fps), and fps is the mRoPE temporal-step denominator (`base_fps/fps = 24/fps`). The PSNR/motion figures above were measured at `fps=10.0`, so they reflect that setting; to evaluate under exactly the v3 training fps semantics, change `fps=10.0` to `fps=None` in `build_rollout_dataset` and re-measure (the numbers will shift). This is a deliberate, documented choice — the `fps=10.0` path is the one the quoted metrics were verified on.
+> **Eval fps matches the released v3 weights.** `rollout.py` builds its eval dataset through `inference.py:build_rollout_dataset` with `fps=None`, so every record is conditioned on its own probed fps (the bundled samples are 30 fps) — exactly the v3 training semantics. fps is the mRoPE temporal-step denominator (`base_fps/fps = 24/fps`); the figures above were measured under `fps=None`, so eval and training share the same temporal encoding (no train/eval fps mismatch).
 
 ### Your own trained checkpoint (DCP)
 

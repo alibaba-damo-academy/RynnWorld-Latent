@@ -77,14 +77,11 @@ def build_rollout_dataset(args):
     return RynnWorldManifestDataset(
         manifest_dir=args.manifest_dir,
         staged_root=args.staged_root or None,
-        # Eval pins fps=10.0, but the released weights are a v3 (fps=None)
-        # checkpoint trained on each record's own probed fps (the bundled samples
-        # are 30 fps). fps is the mRoPE temporal-step denominator (base_fps/fps =
-        # 24/fps), so this is a known train/eval difference, not a bug: the PSNR
-        # figures quoted in the README (~21-23 dB) were measured at fps=10.0. Set
-        # fps=None here to match v3 training exactly -- and re-measure, the numbers
-        # will shift.
-        fps=10.0,
+        # The released weights are a v3 (fps=None) checkpoint trained on each
+        # record's own probed fps (the bundled samples are 30 fps). fps is the
+        # mRoPE temporal-step denominator (base_fps/fps = 24/fps), so eval uses
+        # fps=None to match the training-time temporal encoding exactly.
+        fps=None,
         mode="forward_dynamics",
         action_normalization="quantile",
         viewpoint="ego_view",
