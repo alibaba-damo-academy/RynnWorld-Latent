@@ -1,20 +1,3 @@
----
-license: apache-2.0
-library_name: rynnworld-latent
-pipeline_tag: robotics
-language:
-  - en
-tags:
-  - world-model
-  - video-diffusion
-  - latent-action
-  - cross-embodiment
-  - robot-manipulation
-  - flow-matching
-  - embodied-ai
-  - pytorch
----
-
 <div align="center">
 
 ## RynnWorld-Latent: A Cross-Embodiment World Model Conditioned on Universal Latent Actions
