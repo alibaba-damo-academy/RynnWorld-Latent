@@ -7,9 +7,9 @@
 
 <p align="center">
   💫 <a href="https://alibaba-damo-academy.github.io/RynnWorld-Latent.github.io"><b>Project Page</b></a> &nbsp;&nbsp;|&nbsp;&nbsp;
-  💻 <a href="https://github.com/alibaba-damo-academy/RynnWorld-Latent"><b>GitHub</b></a> &nbsp;&nbsp;|&nbsp;&nbsp;
   🤗 <a href="https://huggingface.co/Alibaba-DAMO-Academy/RynnWorld-Latent"><b>Hugging Face</b></a> &nbsp;&nbsp;|&nbsp;&nbsp;
-  🤖 <a href="https://www.modelscope.cn/models/DAMO_Academy/RynnWorld-Latent"><b>ModelScope</b></a>
+  🤖 <a href="https://www.modelscope.cn/models/DAMO_Academy/RynnWorld-Latent"><b>ModelScope</b></a> &nbsp;&nbsp;|&nbsp;&nbsp;
+  📄 <a href="https://arxiv.org/abs/2610.36791"><b>arXiv</b></a>
 </p>
 
 ---
@@ -177,6 +177,19 @@ python scripts/inference/rollout.py \
 - On the three bundled chunks this reproduces **PSNR(gen,gt) ≈ 21–23 dB** (fps=None, v3 semantics), above the 15–22 dB static-first-frame baseline, motion ratio ≈ 1.0–1.2.
 
 `rollout.py` writes `gen_*.mp4` / `gt_*.mp4` plus per-sample PSNR, the static baseline and the motion ratio. Point `--checkpoint` at your own `.../checkpoints/iter_XXXXXXX` for a trained DCP. Rollout-vs-GT on a manifest is a dynamics-consistency check, **not** a task score — no downstream benchmark orchestration ships here.
+
+## 📑 Citation
+
+If you find this project useful, please cite:
+
+```bibtex
+@article{rynnworldlatent,
+  title  = {RynnWorld-Latent: A Cross-Embodiment World Model Conditioned on Universal Latent Actions},
+  author = {Haoyu Zhao and Yinzhou Tang and Zixuan Wang and Minghao Zhu and Dongchi Huang and Xingyue Zhao and Qin Zhao and Kehan Li and Siteng Huang and Xin Li and Zhenyu Zeng and Mingxiu Chen and Deli Zhao and Zhongyu Li},
+  journal= {arXiv preprint arXiv:2610.36791},
+  year   = {2026},
+}
+```
 
 ## ⚖️ License & Attribution
 
